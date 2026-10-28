@@ -1,4 +1,12 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">Hello World</string>
+    <string name="app_name">Vocalia</string>
+    <string name="status_running">Vocalia activa</string>
+    <string name="status_stopped">Vocalia detenida</string>
+    <string name="start_service">Iniciar servicio</string>
+    <string name="stop_service">Detener servicio</string>
+    <string name="notification_channel_name">Servicio Vocalia</string>
+    <string name="notification_channel_description">Notificación persistente del asistente de voz Vocalia</string>
+    <string name="notification_title">Vocalia activa</string>
+    <string name="notification_text">El asistente de voz está funcionando</string>
+    <string name="accessibility_service_description">Vocalia usa este servicio para leer la pantalla y realizar acciones por ti. Ningún dato sale del dispositivo.</string>
 </resources>

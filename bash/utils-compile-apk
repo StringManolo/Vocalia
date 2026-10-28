@@ -14,4 +14,4 @@ git add .
 git commit -m "$1"
 git push
 
-echo "🔨 Build starting: https://github.com/your_username/your_repo/actions"
+echo "🔨 Build starting: https://github.com/stringmanolo/vocalia/actions"
