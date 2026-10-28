@@ -1,33 +1,20 @@
 package io.github.stringmanolo.vocalia
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import android.annotation.SuppressLint
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import android.os.PowerManager
-import android.provider.Settings
-
-@SuppressLint("BatteryLife")
-private fun requestIgnoreBatteryOptimizations() {
-    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-    if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-            data = Uri.parse("package:$packageName")
-        }
-        startActivity(intent)
-    }
-}
-
 
 class MainActivity : AppCompatActivity() {
 
@@ -51,7 +38,6 @@ class MainActivity : AppCompatActivity() {
             } else {
                 startService(intent)
             }
-            // Pequeño margen para que onStartCommand actualice isRunning
             statusText.postDelayed({ updateStatus() }, 300)
         }
         stopButton.setOnClickListener {
@@ -72,6 +58,17 @@ class MainActivity : AppCompatActivity() {
         statusText.text = getString(
             if (VocaliaService.isRunning) R.string.status_running else R.string.status_stopped
         )
+    }
+
+    @SuppressLint("BatteryLife")
+    private fun requestIgnoreBatteryOptimizations() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        }
     }
 
     private fun requestNotificationPermissionIfNeeded() {
