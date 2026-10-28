@@ -2,7 +2,9 @@ package io.github.stringmanolo.vocalia.tts
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
@@ -31,6 +33,12 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
     // Estado para el drenaje del AudioTrack
     @Volatile private var bytesPending = 0L
     private var releaseRunnable: Runnable? = null
+
+    // Foco de audio
+    private val audioManager by lazy {
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    }
+    private var audioFocusRequest: AudioFocusRequest? = null
 
     // ---------------------------------------------------------------
     // init()
@@ -202,10 +210,68 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
     }
 
     // ---------------------------------------------------------------
+    // Volumen y foco de audio
+    // ---------------------------------------------------------------
+
+    /** Fuerza el volumen del stream MUSIC si está a 0 (típico en EMUI). */
+    private fun ensureMediaVolumeIsUp() {
+        try {
+            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            InternalDebug.mark("ensureMediaVolumeIsUp: current=$current max=$max")
+            if (current == 0) {
+                val target = maxOf(1, max / 2)
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+                InternalDebug.mark("ensureMediaVolumeIsUp: subido a $target")
+            }
+        } catch (t: Throwable) {
+            InternalDebug.mark("ensureMediaVolumeIsUp THREW: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
+    /** Solicita foco de audio para que el sistema nos deje sonar. */
+    private fun requestAudioFocus(): Boolean {
+        return try {
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attrs)
+                .setOnAudioFocusChangeListener { change ->
+                    InternalDebug.mark("onAudioFocusChange: $change")
+                }
+                .build()
+            audioFocusRequest = req
+            val result = audioManager.requestAudioFocus(req)
+            InternalDebug.mark("requestAudioFocus: result=$result (1=GRANTED)")
+            result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } catch (t: Throwable) {
+            InternalDebug.mark("requestAudioFocus THREW: ${t.javaClass.simpleName}: ${t.message}")
+            false
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        try {
+            audioFocusRequest?.let {
+                audioManager.abandonAudioFocusRequest(it)
+                InternalDebug.mark("abandonAudioFocus")
+            }
+        } catch (t: Throwable) {
+            InternalDebug.mark("abandonAudioFocus THREW: ${t.message}")
+        } finally {
+            audioFocusRequest = null
+        }
+    }
+
+    // ---------------------------------------------------------------
     // Reproducción de audio
     // ---------------------------------------------------------------
 
     private fun playChunk(audioData: ByteArray) {
+        ensureMediaVolumeIsUp()
+
         synchronized(audioLock) {
             try {
                 if (audioTrack == null) {
@@ -226,13 +292,14 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
                         return
                     }
                     val bufSize = maxOf(minBuf, audioData.size * 4)
+
+                    val attrs = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+
                     audioTrack = AudioTrack.Builder()
-                        .setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_MEDIA)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build()
-                        )
+                        .setAudioAttributes(attrs)
                         .setAudioFormat(
                             AudioFormat.Builder()
                                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -243,13 +310,24 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
                         .setBufferSizeInBytes(bufSize)
                         .setTransferMode(AudioTrack.MODE_STREAM)
                         .build()
+
                     InternalDebug.mark("playChunk: state=${audioTrack?.state} (1=INITIALIZED_OK)")
                     audioTrack?.setVolume(1.0f)
+                    InternalDebug.mark("playChunk: volume fijado a 1.0")
+
+                    // Pedir foco de audio y precalentar el hardware
+                    requestAudioFocus()
+
+                    InternalDebug.mark("playChunk: precalentando AudioTrack")
                     audioTrack?.play()
-                    InternalDebug.mark("playChunk: play() invocado")
-                    VocaliaLogger.i("EspeakNgEngine", "AudioTrack abierto (rate=$sampleRate, buf=$bufSize)")
+                    try { Thread.sleep(80) } catch (_: InterruptedException) {}
+                    audioTrack?.stop()
+                    audioTrack?.play()
+                    InternalDebug.mark("playChunk: AudioTrack precalentado y reproduciendo")
+
                     bytesPending = 0L
                 }
+
                 val written = audioTrack?.write(audioData, 0, audioData.size) ?: 0
                 if (written > 0) bytesPending += written
                 InternalDebug.mark("playChunk: write size=${audioData.size} result=$written totalPending=$bytesPending")
@@ -262,8 +340,7 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
 
     /**
      * Programa el release del AudioTrack para cuando el buffer se haya
-     * drenado al hardware. Sin esto, el `release()` inmediato en
-     * onSynthDataComplete descarta el audio antes de que suene.
+     * drenado al hardware.
      */
     private fun programarLiberacionTrasDrenaje() {
         releaseRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -274,7 +351,6 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
 
         val pendientes = bytesPending
         bytesPending = 0L
-        // 2 bytes por muestra PCM 16-bit mono
         val durationMs = (pendientes * 1000L) / (sampleRate.toLong() * 2L) + 300L
 
         InternalDebug.mark("programarLiberacion: $pendientes bytes pendientes, esperando ${durationMs}ms")
@@ -285,6 +361,7 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
                     try { track.stop() } catch (_: Exception) {}
                     try { track.release() } catch (_: Exception) {}
                     audioTrack = null
+                    abandonAudioFocus()
                     InternalDebug.mark("AudioTrack liberado tras drenaje")
                 }
             }
@@ -302,6 +379,7 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
             audioTrack = null
         }
         bytesPending = 0L
+        abandonAudioFocus()
     }
 
     // ---------------------------------------------------------------
