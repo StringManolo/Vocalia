@@ -10,6 +10,24 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+
+@SuppressLint("BatteryLife")
+private fun requestIgnoreBatteryOptimizations() {
+    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+    if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+        }
+        startActivity(intent)
+    }
+}
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -20,6 +38,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         statusText = findViewById(R.id.statusText)
+
+        requestIgnoreBatteryOptimizations()
+
         val startButton = findViewById<Button>(R.id.startButton)
         val stopButton  = findViewById<Button>(R.id.stopButton)
 

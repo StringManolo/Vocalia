@@ -17,7 +17,7 @@ class WatchdogReceiver : BroadcastReceiver() {
         private const val REQUEST_BOOT = 100
         private const val REQUEST_WATCHDOG = 101
         // setAndAllowWhileIdle respeta como mínimo ~60 s entre disparos.
-        private const val WATCHDOG_INTERVAL_MS = 60_000L
+        private const val WATCHDOG_INTERVAL_MS = 59_000L
 
         fun pendingIntent(context: Context, action: String, requestCode: Int): PendingIntent {
             val intent = Intent(context, WatchdogReceiver::class.java).apply {
