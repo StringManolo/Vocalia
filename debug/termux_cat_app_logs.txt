@@ -1,0 +1,1 @@
+cat /sdcard/Android/data/io.github.stringmanolo.vocalia.debug/files/logs/crash.log
