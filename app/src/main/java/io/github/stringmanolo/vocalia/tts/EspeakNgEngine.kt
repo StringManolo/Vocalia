@@ -17,6 +17,8 @@ import android.os.SystemClock
 import android.util.Log
 import com.reecedunn.espeak.CheckVoiceData
 import com.reecedunn.espeak.SpeechSynthesis
+import com.reecedunn.espeak.Voice
+import com.reecedunn.espeak.VoiceVariant
 import io.github.stringmanolo.vocalia.util.InternalDebug
 import io.github.stringmanolo.vocalia.util.VocaliaLogger
 import java.io.ByteArrayOutputStream
@@ -30,15 +32,6 @@ import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/**
- * Motor TTS basado en espeak-ng (reecedunn SpeechSynthesis) + AudioTrack en streaming.
- *
- *  - SpeechSynthesis es UNO por proceso (singleton).
- *  - Nada depende del hilo principal para liberar el audio: un hilo "drain" espera a que
- *    playbackHeadPosition llegue al final (eso mide si el sistema CONSUME el audio).
- *  - Con DIAG_ENABLED = true: tonos de prueba, estadísticas del PCM, volcado a WAV y
- *    reproducción del mismo WAV con MediaPlayer. Todo se escribe en INTERNAL_DEBUG.
- */
 class EspeakNgEngine(context: Context) : TtsEngine {
 
     override val name = "EspeakNg"
@@ -46,6 +39,15 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     companion object {
         /** true = tonos de prueba al arrancar + volcado WAV + MediaPlayer tras cada locución. */
         const val DIAG_ENABLED = false
+
+        /**
+         * Idioma de la voz. "es" = español de España (roa/es).
+         * Cambiar a "en" para inglés, "ca" para catalán, etc.
+         */
+        const val TTS_LANGUAGE = "es"
+
+        /** "female" o "male". */
+        const val TTS_VARIANT = "female"
 
         private const val TAG = "EspeakNgEngine"
 
@@ -135,6 +137,12 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 return
             }
 
+            // ============================================================
+            // SELECCIÓN DE VOZ ESPAÑOLA
+            // ============================================================
+            selectVoice(s, TTS_LANGUAGE, TTS_VARIANT)
+            // ============================================================
+
             try { s.Rate.setValue(175) } catch (t: Throwable) { dbgErr("init: Rate.setValue THREW", t) }
 
             try {
@@ -168,6 +176,72 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             mainHandler.post { onError(t.message ?: "Error desconocido") }
         }
     }
+
+    // ---------------------------------------------------------------
+    // Selección de voz
+    // ---------------------------------------------------------------
+
+    /**
+     * Selecciona una voz de espeak-ng por idioma y variante.
+     *
+     * @param language Código ISO 639-1 del idioma ("es", "en", "ca", ...).
+     * @param variant  "female" o "male".
+     */
+    private fun selectVoice(s: SpeechSynthesis, language: String, variant: String) {
+        try {
+            val voices = s.availableVoices
+            dbg("selectVoice: buscando language=$language variant=$variant entre ${voices.size} voces")
+
+            // Prioridad 1: identifier exacto "roa/es" (español de España)
+            // Prioridad 2: cualquier voz cuyo locale.language coincida
+            // Prioridad 3: identifier que empiece por el código
+            val target: Voice? = voices.firstOrNull { it.identifier == languageIdentifierFor(language) }
+                ?: voices.firstOrNull { it.locale?.language == language }
+                ?: voices.firstOrNull { it.identifier.endsWith("/$language") }
+
+            if (target == null) {
+                dbg("selectVoice: NO se encontró voz para language=$language. Se queda la por defecto.")
+                return
+            }
+
+            val v = VoiceVariant.parseVoiceVariant(variant)
+            if (v == null) {
+                dbg("selectVoice: parseVoiceVariant(\"$variant\") devolvió null. Se queda la por defecto.")
+                return
+            }
+
+            s.setVoice(target, v)
+            dbg(
+                "selectVoice: OK identifier=${target.identifier} name=${target.name} " +
+                    "locale=${target.locale} gender=${target.gender} age=${target.age} variant=$v"
+            )
+
+            // Verificación: confirmar que la voz activa es la que pedimos
+            try {
+                val activeVoices = s.availableVoices
+                dbg("selectVoice: total voces tras setVoice=${activeVoices.size}")
+            } catch (_: Throwable) {}
+        } catch (t: Throwable) {
+            dbgErr("selectVoice THREW", t)
+        }
+    }
+
+    /** Mapea "es" -> "roa/es", "en" -> "gmw/en", "ca" -> "roa/ca", etc. */
+    private fun languageIdentifierFor(lang: String): String = when (lang) {
+        "es" -> "roa/es"
+        "ca" -> "roa/ca"
+        "en" -> "gmw/en"
+        "fr" -> "roa/fr"
+        "it" -> "roa/it"
+        "pt" -> "roa/pt"
+        "de" -> "gmw/de"
+        "ru" -> "zle/ru"
+        else -> lang
+    }
+
+    // ---------------------------------------------------------------
+    // Resto: igual que antes
+    // ---------------------------------------------------------------
 
     private fun obtainSharedSynth(): SpeechSynthesis {
         return synchronized(initLock) {
