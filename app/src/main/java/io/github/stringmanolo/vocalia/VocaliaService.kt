@@ -42,7 +42,7 @@ class VocaliaService : Service() {
         VocaliaLogger.i(TAG, "onStartCommand")
         startForegroundCompat()
         isRunning = true
-        return START_NON_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
