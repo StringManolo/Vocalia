@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import com.reecedunn.espeak.CheckVoiceData
 import com.reecedunn.espeak.SpeechSynthesis
+import io.github.stringmanolo.vocalia.util.InternalDebug
 import io.github.stringmanolo.vocalia.util.VocaliaLogger
 import java.io.File
 import java.util.concurrent.Executors
@@ -35,84 +36,162 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
     //      como "CUERPO ORIGINAL" al final de esta clase.
     //   2. Recompila e instala.
     // ============================================================
-    override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
+    /*override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
         VocaliaLogger.w("EspeakNgEngine", "init DESHABILITADO para diagnóstico")
         onError("init deshabilitado para diagnóstico")
-    }
+    }*/
+    override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
+    InternalDebug.init(context)
+    InternalDebug.mark("EspeakNgEngine.init START")
+    Thread {
+        try {
+            InternalDebug.mark("init.thread START")
+            extractVoiceDataIfNeeded()
+            InternalDebug.mark("init: extractVoiceDataIfNeeded returned")
+
+            InternalDebug.mark("init: creating SynthReadyCallback (triggers SpeechSynthesis.<clinit>)")
+            val callback = object : SpeechSynthesis.SynthReadyCallback {
+                override fun onSynthDataReady(audioData: ByteArray) {
+                    InternalDebug.mark("callback.onSynthDataReady size=${audioData.size}")
+                    playChunk(audioData)
+                }
+                override fun onSynthDataComplete() {
+                    InternalDebug.mark("callback.onSynthDataComplete")
+                    synchronized(audioLock) {
+                        try { audioTrack?.stop() } catch (_: Exception) {}
+                        try { audioTrack?.release() } catch (_: Exception) {}
+                        audioTrack = null
+                    }
+                }
+                override fun onSynthWordBoundary(
+                    textPosition: Int, textLength: Int, markerInFrames: Int
+                ) {}
+            }
+            InternalDebug.mark("init: callback created (static block OK si llegamos aquí)")
+
+            InternalDebug.mark("init: SpeechSynthesis.getVersion() probe")
+            val version = try {
+                SpeechSynthesis.getVersion()
+            } catch (t: Throwable) {
+                InternalDebug.mark("init: getVersion THREW ${t.javaClass.simpleName}: ${t.message}")
+                throw t
+            }
+            InternalDebug.mark("init: getVersion OK -> $version")
+
+            InternalDebug.mark("init: calling SpeechSynthesis(context, callback)")
+            val s = SpeechSynthesis(context, callback)
+            InternalDebug.mark("init: SpeechSynthesis constructor RETURNED")
+
+            val sampleRate = s.sampleRate
+            InternalDebug.mark("init: sampleRate=$sampleRate")
+            if (sampleRate <= 0) {
+                InternalDebug.mark("init: sampleRate<=0, abortando")
+                mainHandler.post {
+                    onError(
+                        "SpeechSynthesis no se inicializó (sampleRate=0). " +
+                        "hasBaseResources=${safeHasBaseResources()}"
+                    )
+                }
+                return@Thread
+            }
+
+            InternalDebug.mark("init: set Rate 175")
+            try { s.Rate.setValue(175) } catch (_: Exception) {}
+
+            InternalDebug.mark("init: getAvailableVoices")
+            try {
+                val voices = s.availableVoices
+                InternalDebug.mark("init: ${voices.size} voices disponibles")
+                voices.take(8).forEach { v ->
+                    InternalDebug.mark("init:   voice ${v.identifier}")
+                }
+            } catch (t: Throwable) {
+                InternalDebug.mark("init: voices THREW ${t.javaClass.simpleName}: ${t.message}")
+            }
+
+            synth = s
+            initialized = true
+            InternalDebug.mark("init: READY, invocando onReady")
+            mainHandler.post { onReady() }
+
+            pendingText?.let { text -> pendingText = null; speak(text) }
+        } catch (t: Throwable) {
+            InternalDebug.mark("init: CAUGHT ${t.javaClass.simpleName}: ${t.message}")
+            VocaliaLogger.e("EspeakNgEngine", "Error init: ${t.message}", t as? Exception)
+            mainHandler.post { onError(t.message ?: "Error desconocido") }
+        }
+    }.start()
+}
 
     // ---------------------------------------------------------------
     // Extracción de datos de voz
     // ---------------------------------------------------------------
 
     private fun extractVoiceDataIfNeeded() {
-        val dataPath = safeDataPath()
-            ?: File(context.filesDir, "espeak-data").also { it.mkdirs() }
+    val filesRoot = context.filesDir
+    val dataDir = File(filesRoot, "espeak-ng-data")
 
-        if (safeHasBaseResources()) {
-            VocaliaLogger.i("EspeakNgEngine", "Datos de voz ya presentes")
-            return
-        }
+    InternalDebug.mark("extract START filesRoot=$filesRoot dataDir=$dataDir")
 
-        // Limpiar restos de extracciones previas con estructura anidada
-        val straySubdir = File(dataPath, "espeak-ng-data")
-        if (straySubdir.exists()) {
-            VocaliaLogger.i("EspeakNgEngine", "Eliminando ${straySubdir.absolutePath} de extracción previa")
-            straySubdir.deleteRecursively()
-        }
+    if (safeHasBaseResources()) {
+        InternalDebug.mark("extract: hasBaseResources=true, nada que hacer")
+        return
+    }
 
-        VocaliaLogger.i("EspeakNgEngine", "Extrayendo espeakdata.zip...")
-        val resId = context.resources.getIdentifier("espeakdata", "raw", context.packageName)
-        if (resId == 0) {
-            throw IllegalStateException("res/raw/espeakdata.zip no encontrado en la APK")
-        }
+    InternalDebug.mark("extract: limpiando restos previos")
+    File(filesRoot, "espeak-data").listFiles()?.forEach { it.deleteRecursively() }
+    if (dataDir.exists()) dataDir.deleteRecursively()
 
-        val tempZip = File(context.cacheDir, "espeakdata.zip")
-        context.resources.openRawResource(resId).use { input ->
-            tempZip.outputStream().use { input.copyTo(it) }
-        }
+    InternalDebug.mark("extract: localizando res/raw/espeakdata")
+    val resId = context.resources.getIdentifier("espeakdata", "raw", context.packageName)
+    InternalDebug.mark("extract: resId=$resId")
+    if (resId == 0) throw IllegalStateException("res/raw/espeakdata.zip no encontrado")
 
-        // El ZIP de espeak-ng tiene una carpeta raíz "espeak-ng-data/" que hay que aplanar
-        val zipPrefix = "espeak-ng-data/"
+    InternalDebug.mark("extract: copiando ZIP a cache")
+    val tempZip = File(context.cacheDir, "espeakdata.zip")
+    context.resources.openRawResource(resId).use { input ->
+        tempZip.outputStream().use { input.copyTo(it) }
+    }
+    InternalDebug.mark("extract: ZIP copiado, size=${tempZip.length()}")
 
-        ZipInputStream(tempZip.inputStream().buffered()).use { zis ->
-            var entry = zis.nextEntry
-            while (entry != null) {
-                var name = entry.name
-                if (name.startsWith(zipPrefix)) {
-                    name = name.substring(zipPrefix.length)
-                }
-                if (name.isEmpty()) {
-                    zis.closeEntry()
-                    entry = zis.nextEntry
-                    continue
-                }
-                val target = File(dataPath, name)
-                if (!target.canonicalPath.startsWith(dataPath.canonicalPath + File.separator) &&
-                    target.canonicalPath != dataPath.canonicalPath
-                ) {
-                    VocaliaLogger.w("EspeakNgEngine", "Ignorando entrada sospechosa: ${entry.name}")
-                } else if (entry.isDirectory) {
-                    target.mkdirs()
-                } else {
-                    target.parentFile?.mkdirs()
-                    target.outputStream().use { zis.copyTo(it) }
-                }
-                zis.closeEntry()
-                entry = zis.nextEntry
+    InternalDebug.mark("extract: descomprimiendo")
+    var count = 0
+    ZipInputStream(tempZip.inputStream().buffered()).use { zis ->
+        var entry = zis.nextEntry
+        while (entry != null) {
+            val name = entry.name
+            val target = File(filesRoot, name)
+            if (!target.canonicalPath.startsWith(filesRoot.canonicalPath + File.separator) &&
+                target.canonicalPath != filesRoot.canonicalPath
+            ) {
+                InternalDebug.mark("extract: SKIP $name")
+            } else if (entry.isDirectory) {
+                target.mkdirs()
+            } else {
+                target.parentFile?.mkdirs()
+                target.outputStream().use { zis.copyTo(it) }
+                count++
             }
-        }
-        tempZip.delete()
-
-        val ok = safeHasBaseResources()
-        VocaliaLogger.i("EspeakNgEngine", "Extracción completada. hasBaseResources=$ok")
-        if (!ok) {
-            try {
-                dataPath.listFiles()?.take(20)?.forEach { f ->
-                    VocaliaLogger.i("EspeakNgEngine", "  dataPath/${f.name} (dir=${f.isDirectory})")
-                }
-            } catch (_: Exception) {}
+            zis.closeEntry()
+            entry = zis.nextEntry
         }
     }
+    tempZip.delete()
+    InternalDebug.mark("extract: descomprimidos $count archivos")
+
+    val ok = safeHasBaseResources()
+    InternalDebug.mark("extract END hasBaseResources=$ok")
+    if (!ok) {
+        dataDir.listFiles()?.take(20)?.forEach { f ->
+            InternalDebug.mark("extract:   $dataDir/${f.name} (dir=${f.isDirectory})")
+        }
+    }
+}
+
+
+
+
+
 
     private fun safeHasBaseResources(): Boolean = try {
         CheckVoiceData.hasBaseResources(context)
@@ -225,79 +304,4 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
         initialized = false
     }
 
-    // ============================================================
-    // CUERPO ORIGINAL DE init() — restaurar cuando el test acabe
-    //
-    // Para volver al comportamiento funcional, sustituye la
-    // implementación actual de init() (la que hace
-    // "init DESHABILITADO") por este bloque:
-    //
-    // override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
-    //     Thread {
-    //         try {
-    //             extractVoiceDataIfNeeded()
-    //
-    //             val callback = object : SpeechSynthesis.SynthReadyCallback {
-    //                 override fun onSynthDataReady(audioData: ByteArray) {
-    //                     playChunk(audioData)
-    //                 }
-    //
-    //                 override fun onSynthDataComplete() {
-    //                     synchronized(audioLock) {
-    //                         try { audioTrack?.stop() } catch (_: Exception) {}
-    //                         try { audioTrack?.release() } catch (_: Exception) {}
-    //                         audioTrack = null
-    //                     }
-    //                 }
-    //
-    //                 override fun onSynthWordBoundary(
-    //                     textPosition: Int,
-    //                     textLength: Int,
-    //                     markerInFrames: Int
-    //                 ) {
-    //                     // Futuro: resaltado de palabra
-    //                 }
-    //             }
-    //
-    //             val s = SpeechSynthesis(context, callback)
-    //             val sampleRate = s.sampleRate
-    //             if (sampleRate <= 0) {
-    //                 mainHandler.post {
-    //                     onError(
-    //                         "SpeechSynthesis no se inicializó (sampleRate=0). " +
-    //                         "Revisa: hasBaseResources=${safeHasBaseResources()}, " +
-    //                         "datos en ${safeDataPath()?.absolutePath}"
-    //                     )
-    //                 }
-    //                 return@Thread
-    //             }
-    //
-    //             try { s.Rate.setValue(175) } catch (_: Exception) {}
-    //
-    //             try {
-    //                 val voices = s.availableVoices
-    //                 VocaliaLogger.i("EspeakNgEngine", "Voces disponibles: ${voices.size}")
-    //                 voices.take(8).forEach { v ->
-    //                     VocaliaLogger.i("EspeakNgEngine", "  - ${v.name} / ${v.identifier}")
-    //                 }
-    //             } catch (t: Throwable) {
-    //                 VocaliaLogger.w("EspeakNgEngine", "No se pudo listar voces: ${t.message}")
-    //             }
-    //
-    //             synth = s
-    //             initialized = true
-    //             VocaliaLogger.i("EspeakNgEngine", "espeak-ng listo (sampleRate=$sampleRate)")
-    //             mainHandler.post { onReady() }
-    //
-    //             pendingText?.let { text ->
-    //                 pendingText = null
-    //                 speak(text)
-    //             }
-    //         } catch (t: Throwable) {
-    //             VocaliaLogger.e("EspeakNgEngine", "Error init: ${t.message}", t as? Exception)
-    //             mainHandler.post { onError(t.message ?: "Error desconocido") }
-    //         }
-    //     }.start()
-    // }
-    // ============================================================
 }
