@@ -212,43 +212,57 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
     // ---------------------------------------------------------------
 
     private fun playChunk(audioData: ByteArray) {
-        synchronized(audioLock) {
-            try {
-                if (audioTrack == null) {
-                    val sampleRate = synth?.sampleRate ?: return
-                    val minBuf = AudioTrack.getMinBufferSize(
-                        sampleRate,
-                        AudioFormat.CHANNEL_OUT_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT
-                    )
-                    val bufSize = maxOf(minBuf, audioData.size * 4)
-
-                    audioTrack = AudioTrack.Builder()
-                        .setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
-                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                                .build()
-                        )
-                        .setAudioFormat(
-                            AudioFormat.Builder()
-                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                                .setSampleRate(sampleRate)
-                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                                .build()
-                        )
-                        .setBufferSizeInBytes(bufSize)
-                        .setTransferMode(AudioTrack.MODE_STREAM)
-                        .build()
-                    audioTrack?.play()
-                    VocaliaLogger.i("EspeakNgEngine", "AudioTrack abierto (rate=$sampleRate, buf=$bufSize)")
+    synchronized(audioLock) {
+        try {
+            if (audioTrack == null) {
+                val sampleRate = synth?.sampleRate
+                InternalDebug.mark("playChunk: creating AudioTrack rate=$sampleRate size=${audioData.size}")
+                if (sampleRate == null || sampleRate <= 0) {
+                    InternalDebug.mark("playChunk: ABORT sampleRate inválido=$sampleRate")
+                    return
                 }
-                audioTrack?.write(audioData, 0, audioData.size)
-            } catch (t: Throwable) {
-                VocaliaLogger.e("EspeakNgEngine", "Error en playChunk: ${t.message}", t as? Exception)
+                val minBuf = AudioTrack.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
+                InternalDebug.mark("playChunk: minBuf=$minBuf")
+                if (minBuf <= 0) {
+                    InternalDebug.mark("playChunk: ABORT minBuf inválido")
+                    return
+                }
+                val bufSize = maxOf(minBuf, audioData.size * 4)
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(bufSize)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+                InternalDebug.mark("playChunk: state=${audioTrack?.state} (3=INITIALIZED_OK)")
+                audioTrack?.setVolume(1.0f)
+                val playResult = audioTrack?.play()
+                InternalDebug.mark("playChunk: play()=$playResult (0=SUCCESS)")
+                VocaliaLogger.i("EspeakNgEngine", "AudioTrack abierto (rate=$sampleRate, buf=$bufSize)")
             }
+            val written = audioTrack?.write(audioData, 0, audioData.size)
+            InternalDebug.mark("playChunk: write size=${audioData.size} result=$written")
+        } catch (t: Throwable) {
+            InternalDebug.mark("playChunk: THREW ${t.javaClass.simpleName}: ${t.message}")
+            VocaliaLogger.e("EspeakNgEngine", "Error en playChunk: ${t.message}", t as? Exception)
         }
     }
+}
 
     // ---------------------------------------------------------------
     // TtsEngine
