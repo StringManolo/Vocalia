@@ -33,9 +33,7 @@ import kotlin.math.sqrt
 /**
  * Motor TTS basado en espeak-ng (reecedunn SpeechSynthesis) + AudioTrack en streaming.
  *
- * Cambios respecto a la versión anterior:
- *  - SpeechSynthesis es UNO por proceso (singleton). Antes se creaba uno nuevo en cada
- *    arranque del servicio y la 2.ª locución salía recortada (0,28 s en vez de 1,05 s).
+ *  - SpeechSynthesis es UNO por proceso (singleton).
  *  - Nada depende del hilo principal para liberar el audio: un hilo "drain" espera a que
  *    playbackHeadPosition llegue al final (eso mide si el sistema CONSUME el audio).
  *  - Con DIAG_ENABLED = true: tonos de prueba, estadísticas del PCM, volcado a WAV y
@@ -47,7 +45,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
 
     companion object {
         /** true = tonos de prueba al arrancar + volcado WAV + MediaPlayer tras cada locución. */
-        const val DIAG_ENABLED = true
+        const val DIAG_ENABLED = false
 
         private const val TAG = "EspeakNgEngine"
 
@@ -56,7 +54,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         @Volatile private var sharedSynth: SpeechSynthesis? = null
         @Volatile private var activeEngine: EspeakNgEngine? = null
 
-        // Un solo hilo de síntesis para todo el proceso (el motor nativo no es reentrante).
         private val synthExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "espeak-synth").apply { isDaemon = true }
         }
@@ -87,18 +84,15 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     @Volatile private var pendingText: String? = null
     @Volatile private var lastSpeakAt = 0L
 
-    // Para descartar PCM de locuciones interrumpidas.
     private val generation = AtomicInteger(0)
     @Volatile private var synthGeneration = 0
 
-    // Estado de audio (todo bajo audioLock)
     private val audioLock = Any()
     private var track: AudioTrack? = null
     private val liveJobs = mutableListOf<DrainJob>()
     private var focusRequest: AudioFocusRequest? = null
     @Volatile private var drainThread: Thread? = null
 
-    // Estadísticas de la locución en curso (bajo audioLock)
     private var uttId = 0
     private var uttBytes = 0L
     private var uttChunks = 0
@@ -108,10 +102,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     private var uttSamples = 0L
     private var uttWav = ByteArrayOutputStream()
 
-    // ---------------------------------------------------------------
-    // Logging
-    // ---------------------------------------------------------------
-
     private fun dbg(msg: String) {
         InternalDebug.mark("[${Thread.currentThread().name}] $msg")
     }
@@ -120,10 +110,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         val st = Log.getStackTraceString(t).lines().take(6).joinToString(" | ")
         InternalDebug.mark("[${Thread.currentThread().name}] $msg -> ${t.javaClass.simpleName}: ${t.message} :: $st")
     }
-
-    // ---------------------------------------------------------------
-    // init()
-    // ---------------------------------------------------------------
 
     override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
         InternalDebug.init(ctx)
@@ -183,7 +169,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    /** Un único SpeechSynthesis por proceso; el callback delega en el motor activo. */
     private fun obtainSharedSynth(): SpeechSynthesis {
         return synchronized(initLock) {
             val existing = sharedSynth
@@ -204,7 +189,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                     override fun onSynthWordBoundary(
                         textPosition: Int, textLength: Int, markerInFrames: Int
                     ) {
-                        // Futuro: resaltado de palabra
                     }
                 }
                 dbg("synth: callback creado (la librería nativa cargó bien)")
@@ -225,10 +209,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             }
         }
     }
-
-    // ---------------------------------------------------------------
-    // Extracción de datos de voz
-    // ---------------------------------------------------------------
 
     private fun extractVoiceDataIfNeeded() {
         val filesRoot = ctx.filesDir
@@ -288,10 +268,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         false
     }
 
-    // ---------------------------------------------------------------
-    // Volumen, foco de audio y estado del sistema
-    // ---------------------------------------------------------------
-
     private fun ensureMediaVolumeIsUp() {
         try {
             val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -307,7 +283,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    /** Llamar con audioLock tomado. */
     private fun requestAudioFocusLocked() {
         if (focusRequest != null) return
         try {
@@ -327,7 +302,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    /** Llamar con audioLock tomado. */
     private fun abandonAudioFocusLocked() {
         val req = focusRequest ?: return
         try {
@@ -341,7 +315,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     }
 
     private fun describeDevice(d: AudioDeviceInfo?): String =
-        // type: 1=EARPIECE 2=SPEAKER 3=WIRED_HEADSET 4=WIRED_HEADPHONES 7=BT_SCO 8=BT_A2DP 18=TELEPHONY
         if (d == null) "null" else "type=${d.type} id=${d.id} name=${d.productName} sink=${d.isSink}"
 
     private fun diagAudioState(tag: String) {
@@ -379,10 +352,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             dbgErr("diagAudioState THREW", t)
         }
     }
-
-    // ---------------------------------------------------------------
-    // Tests de arranque (solo si DIAG_ENABLED)
-    // ---------------------------------------------------------------
 
     private fun runStartupAudioTests() {
         try {
@@ -463,10 +432,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    // ---------------------------------------------------------------
-    // Reproducción (streaming)
-    // ---------------------------------------------------------------
-
     private fun safeHead(t: AudioTrack): Int = try { t.playbackHeadPosition } catch (e: Throwable) { -1 }
     private fun safePlayState(t: AudioTrack): Int = try { t.playState } catch (e: Throwable) { -1 }
 
@@ -480,7 +445,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         uttWav.reset()
     }
 
-    /** Llamar con audioLock tomado. Devuelve false si no se pudo crear el track. */
     private fun openTrackLocked(rate: Int): Boolean {
         if (rate <= 0) {
             dbg("openTrack: ABORT sampleRate inválido=$rate")
@@ -542,7 +506,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         return true
     }
 
-    /** Llamado por el callback nativo, en el hilo de síntesis. */
     private fun onPcm(pcm: ByteArray) {
         if (shuttingDown) return
         if (synthGeneration != generation.get()) {
@@ -551,7 +514,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
         val rate = sharedSynth?.sampleRate ?: 0
 
-        // Si no hay track abierto, espera a que termine el audio de la locución anterior.
         if (track == null) {
             val prev = drainThread
             if (prev != null && prev.isAlive) {
@@ -565,7 +527,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             track
         } ?: return
 
-        // Estadísticas del PCM (16 bit little endian)
         var peak = 0
         var sumSq = 0.0
         var zeros = 0L
@@ -607,7 +568,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         )
     }
 
-    /** Llamado al terminar la síntesis (callback nativo o fallback tras synthesize()). */
     private fun onPcmComplete(fromCallback: Boolean) {
         if (shuttingDown) return
 
@@ -641,7 +601,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         th.start()
     }
 
-    /** Espera (sin tocar el hilo principal) a que el sistema consuma todo el audio escrito. */
     private fun drainWorker(job: DrainJob) {
         val frames = (job.bytes / 2).toInt()
         val expectedMs = if (job.rate > 0) frames * 1000L / job.rate else 0L
@@ -693,7 +652,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             dbg("drain#${job.id}: TIMEOUT head=$head/$frames underruns=$underruns playState=${safePlayState(job.track)} routed=$routed")
         }
 
-        // Margen para que el HAL termine de reproducir la cola.
         try { Thread.sleep(250) } catch (_: InterruptedException) {}
 
         synchronized(audioLock) {
@@ -731,10 +689,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    // ---------------------------------------------------------------
-    // Diagnóstico: WAV + MediaPlayer (mismo audio por otro camino)
-    // ---------------------------------------------------------------
-
     private fun writeWav(file: File, pcm: ByteArray, sampleRate: Int) {
         val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
         header.put("RIFF".toByteArray(Charsets.US_ASCII))
@@ -742,12 +696,12 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         header.put("WAVE".toByteArray(Charsets.US_ASCII))
         header.put("fmt ".toByteArray(Charsets.US_ASCII))
         header.putInt(16)
-        header.putShort(1.toShort())            // PCM
-        header.putShort(1.toShort())            // mono
+        header.putShort(1.toShort())
+        header.putShort(1.toShort())
         header.putInt(sampleRate)
-        header.putInt(sampleRate * 2)           // byte rate
-        header.putShort(2.toShort())            // block align
-        header.putShort(16.toShort())           // bits por muestra
+        header.putInt(sampleRate * 2)
+        header.putShort(2.toShort())
+        header.putShort(16.toShort())
         header.put("data".toByteArray(Charsets.US_ASCII))
         header.putInt(pcm.size)
         file.outputStream().use {
@@ -797,10 +751,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    // ---------------------------------------------------------------
-    // TtsEngine
-    // ---------------------------------------------------------------
-
     override fun speak(text: String, interruptible: Boolean) {
         dbg("speak(\"$text\", interruptible=$interruptible) initialized=$initialized")
         if (!initialized) {
@@ -840,7 +790,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 dbg("synth: synthesize START \"$text\" gen=$gen")
                 s.synthesize(text, false)
                 dbg("synth: synthesize RETURNED tras ${SystemClock.elapsedRealtime() - t0}ms")
-                // Por si el callback de "completo" no llegó: vacía lo pendiente.
                 onPcmComplete(false)
             } catch (t: Throwable) {
                 dbgErr("synth: synthesize THREW", t)
@@ -873,6 +822,5 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         stop()
         if (activeEngine === this) activeEngine = null
         initialized = false
-        // OJO: no se cierra synthExecutor ni sharedSynth; son compartidos por todo el proceso.
     }
 }
