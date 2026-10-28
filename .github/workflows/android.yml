@@ -36,15 +36,32 @@ jobs:
         with:
           packages: 'ndk;27.0.12077973'
 
-      # --- NUEVO: Compilar espeak-ng y extraer artefactos ---
+      # --- Descargar sherpa-onnx AAR si no está en el repo ---
+      - name: 📥 Ensure sherpa-onnx AAR is present
+        run: |
+          set -e
+          AAR_PATH="app/libs/sherpa-onnx-2.0.1.aar"
+          mkdir -p app/libs
+          if [ -f "$AAR_PATH" ]; then
+            echo "✅ $AAR_PATH ya existe en el repo. No se descarga."
+          else
+            echo "⚠️ $AAR_PATH no está en el repo. Descargando..."
+            SHERPA_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar"
+            if ! curl -fL --retry 3 -o "$AAR_PATH" "$SHERPA_URL"; then
+              echo "❌ No se pudo descargar $SHERPA_URL"
+              exit 1
+            fi
+            echo "✅ Descargado desde $SHERPA_URL"
+          fi
+          ls -la "$AAR_PATH"
+
+      # --- Compilar espeak-ng y extraer artefactos ---
       - name: 🏗️ Build espeak-ng and extract artifacts
         run: |
           set -e
 
-          # 1. Clonar el repositorio de espeak-ng
           git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git /tmp/espeak-ng
 
-          # 2. Compilar la APK de espeak-ng con su propio Gradle
           cd /tmp/espeak-ng/android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
@@ -56,11 +73,9 @@ jobs:
           fi
           echo "APK encontrada en: $APK_PATH"
 
-          # 3. Extraer todo el contenido del APK
           mkdir -p /tmp/espeak_extract
           unzip -o "$APK_PATH" -d /tmp/espeak_extract
 
-          # 4. Copiar libttsespeak.so para cada ABI disponible
           mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs
           for abi in arm64-v8a armeabi-v7a x86 x86_64; do
             if [ -f "/tmp/espeak_extract/lib/$abi/libttsespeak.so" ]; then
@@ -71,7 +86,6 @@ jobs:
             fi
           done
 
-          # 5. Copiar espeakdata.zip del APK, o generarlo si no está
           mkdir -p $GITHUB_WORKSPACE/app/src/main/res/raw
           if [ -f "/tmp/espeak_extract/res/raw/espeakdata.zip" ]; then
             cp "/tmp/espeak_extract/res/raw/espeakdata.zip" \
@@ -95,7 +109,6 @@ jobs:
             echo "✅ espeakdata.zip generado desde $ESPEAKDATA_PATH"
           fi
 
-          # 6. Verificación final
           echo "=== jniLibs ==="
           ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/*/
           echo "=== res/raw ==="
