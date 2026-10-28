@@ -1,7 +1,7 @@
 package io.github.stringmanolo.vocalia
+import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 import android.accessibilityservice.AccessibilityService
-import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 
 class VocaliaAccessibilityService : AccessibilityService() {
@@ -12,7 +12,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Log.i(TAG, "AccessibilityService conectado")
+        VocaliaLogger.i(TAG, "AccessibilityService conectado")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -20,6 +20,6 @@ class VocaliaAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        Log.i(TAG, "AccessibilityService interrumpido")
+        VocaliaLogger.i(TAG, "AccessibilityService interrumpido")
     }
 }

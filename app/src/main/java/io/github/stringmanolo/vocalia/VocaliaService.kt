@@ -1,4 +1,5 @@
 package io.github.stringmanolo.vocalia
+import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -9,7 +10,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 
 class VocaliaService : Service() {
 
@@ -25,11 +25,11 @@ class VocaliaService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.i(TAG, "onCreate")
+        VocaliaLogger.i(TAG, "onCreate")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.i(TAG, "onStartCommand")
+        VocaliaLogger.i(TAG, "onStartCommand")
         // Debe llamarse SIEMPRE en menos de 5 s o el sistema lanza excepción
         startForegroundCompat()
         isRunning = true
@@ -37,7 +37,7 @@ class VocaliaService : Service() {
     }
 
     override fun onDestroy() {
-        Log.i(TAG, "onDestroy")
+        VocaliaLogger.i(TAG, "onDestroy")
         isRunning = false
         super.onDestroy()
     }

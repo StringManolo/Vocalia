@@ -1,10 +1,10 @@
 package io.github.stringmanolo.vocalia
+import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 import android.app.AlarmManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 
 class BootReceiver : BroadcastReceiver() {
 
@@ -14,7 +14,7 @@ class BootReceiver : BroadcastReceiver() {
             action != Intent.ACTION_LOCKED_BOOT_COMPLETED &&
             action != "android.intent.action.QUICKBOOT_POWERON") return
 
-        Log.i("BootReceiver", "Boot event: $action")
+        VocaliaLogger.i("BootReceiver", "Boot event: $action")
 
         // En Android 12+ no se puede arrancar un FGS directamente desde BOOT_COMPLETED.
         // Programamos una alarma ~5 s después, y esa alarma (WatchdogReceiver) sí arranca el servicio.

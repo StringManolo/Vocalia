@@ -30,10 +30,13 @@ class MainActivity : AppCompatActivity() {
 
         val startButton = findViewById<Button>(R.id.startButton)
         val stopButton  = findViewById<Button>(R.id.stopButton)
+        findViewById<Button>(R.id.showLogsButton).setOnClickListener {
+          startActivity(Intent(this, LogActivity::class.java))
+        }
 
         startButton.setOnClickListener {
-            val intent = Intent(this, VocaliaService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+          val intent = Intent(this, VocaliaService::class.java)
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
             } else {
                 startService(intent)

@@ -1,4 +1,5 @@
 package io.github.stringmanolo.vocalia
+import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -6,7 +7,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
 
 class WatchdogReceiver : BroadcastReceiver() {
 
@@ -46,7 +46,7 @@ class WatchdogReceiver : BroadcastReceiver() {
                 }
             } catch (e: Exception) {
                 // Android 12+ puede lanzar ForegroundServiceStartNotAllowedException
-                Log.w(TAG, "No se pudo arrancar el servicio: ${e.message}")
+                VocaliaLogger.w(TAG, "No se pudo arrancar el servicio: ${e.message}")
             }
         }
     }
@@ -54,12 +54,12 @@ class WatchdogReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_BOOT_START -> {
-                Log.i(TAG, "Arranque post-boot")
+                VocaliaLogger.i(TAG, "Arranque post-boot")
                 if (!VocaliaService.isRunning) startServiceSafely(context)
                 scheduleWatchdog(context)
             }
             ACTION_WATCHDOG -> {
-                Log.d(TAG, "Tick watchdog (running=${VocaliaService.isRunning})")
+                VocaliaLogger.d(TAG, "Tick watchdog (running=${VocaliaService.isRunning})")
                 if (!VocaliaService.isRunning) startServiceSafely(context)
                 scheduleWatchdog(context)
             }

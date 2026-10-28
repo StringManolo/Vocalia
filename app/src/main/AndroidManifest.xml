@@ -29,6 +29,8 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".LogActivity" android:exported="false" />
+
         <!-- Servicio principal en primer plano -->
         <service
             android:name=".VocaliaService"

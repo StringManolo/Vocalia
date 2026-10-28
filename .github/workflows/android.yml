@@ -1,4 +1,3 @@
-
 name: Android Native CI/CD
 
 on:
@@ -8,14 +7,14 @@ on:
     branches: [ "main" ]
   create:
     tags:
-      - 'v*' 
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write 
+      contents: write
 
     steps:
       - name: 🚀 Checkout Code
@@ -31,6 +30,44 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.5'
+
+      # --- NUEVO: Instalar Android NDK ---
+      - name: 🧰 Setup Android NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'ndk;27.0.12077973' # Una versión estable y reciente del NDK
+
+      # --- NUEVO: Compilar espeak-ng para Android ---
+      - name: 🏗️ Build espeak-ng native libraries and data
+        run: |
+          # 1. Clonar el repositorio de espeak-ng
+          git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git /tmp/espeak-ng
+          cd /tmp/espeak-ng
+
+          # 2. Compilar las librerías .so con ndk-build
+          cd android
+          # Asegurar que ndk-build está en el PATH
+          export PATH=$ANDROID_HOME/ndk/27.0.12077973:$PATH
+          ndk-build
+          cd ..
+
+          # 3. Generar espeakdata.zip (el método fiable es usar el script de CI o make)
+          #    Según la documentación, se puede usar el propio sistema de build.
+          #    Probamos con 'make android' que es el objetivo que genera los datos.
+          ./autogen.sh
+          ./configure --prefix=/usr
+          make android || make espeakdata # Fallback por si el target cambia de nombre
+
+          # 4. Copiar las librerías .so generadas a tu proyecto
+          #    ndk-build las deja en android/libs/<ABI>/
+          mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs
+          cp -r android/libs/* $GITHUB_WORKSPACE/app/src/main/jniLibs/
+
+          # 5. Copiar espeakdata.zip a res/raw
+          mkdir -p $GITHUB_WORKSPACE/app/src/main/res/raw
+          # Buscar el zip generado y copiarlo
+          find . -name "espeakdata.zip" -exec cp {} $GITHUB_WORKSPACE/app/src/main/res/raw/espeakdata.zip \;
+          echo "✅ Librerías .so y espeakdata.zip generados desde el código fuente."
 
       - name: 🏗️ Build Debug APK
         run: gradle assembleDebug --stacktrace
