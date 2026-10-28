@@ -31,43 +31,75 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      # --- NUEVO: Instalar Android NDK ---
-      - name: 🧰 Setup Android NDK
+      - name: 🧰 Setup Android SDK and NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'ndk;27.0.12077973' # Una versión estable y reciente del NDK
+          packages: 'ndk;27.0.12077973'
 
-      # --- NUEVO: Compilar espeak-ng para Android ---
-      - name: 🏗️ Build espeak-ng native libraries and data
+      # --- NUEVO: Compilar espeak-ng y extraer artefactos ---
+      - name: 🏗️ Build espeak-ng and extract artifacts
         run: |
+          set -e
+
           # 1. Clonar el repositorio de espeak-ng
           git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git /tmp/espeak-ng
-          cd /tmp/espeak-ng
 
-          # 2. Compilar las librerías .so con ndk-build
-          cd android
-          # Asegurar que ndk-build está en el PATH
-          export PATH=$ANDROID_HOME/ndk/27.0.12077973:$PATH
-          ndk-build
-          cd ..
+          # 2. Compilar la APK de espeak-ng con su propio Gradle
+          cd /tmp/espeak-ng/android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
-          # 3. Generar espeakdata.zip (el método fiable es usar el script de CI o make)
-          #    Según la documentación, se puede usar el propio sistema de build.
-          #    Probamos con 'make android' que es el objetivo que genera los datos.
-          ./autogen.sh
-          ./configure --prefix=/usr
-          make android || make espeakdata # Fallback por si el target cambia de nombre
+          APK_PATH=$(find /tmp/espeak-ng/android -name "*.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            echo "❌ No se encontró el APK de espeak-ng"
+            exit 1
+          fi
+          echo "APK encontrada en: $APK_PATH"
 
-          # 4. Copiar las librerías .so generadas a tu proyecto
-          #    ndk-build las deja en android/libs/<ABI>/
+          # 3. Extraer todo el contenido del APK
+          mkdir -p /tmp/espeak_extract
+          unzip -o "$APK_PATH" -d /tmp/espeak_extract
+
+          # 4. Copiar libttsespeak.so para cada ABI disponible
           mkdir -p $GITHUB_WORKSPACE/app/src/main/jniLibs
-          cp -r android/libs/* $GITHUB_WORKSPACE/app/src/main/jniLibs/
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            if [ -f "/tmp/espeak_extract/lib/$abi/libttsespeak.so" ]; then
+              mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi"
+              cp "/tmp/espeak_extract/lib/$abi/libttsespeak.so" \
+                 "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi/"
+              echo "✅ .so copiado para $abi"
+            fi
+          done
 
-          # 5. Copiar espeakdata.zip a res/raw
+          # 5. Copiar espeakdata.zip del APK, o generarlo si no está
           mkdir -p $GITHUB_WORKSPACE/app/src/main/res/raw
-          # Buscar el zip generado y copiarlo
-          find . -name "espeakdata.zip" -exec cp {} $GITHUB_WORKSPACE/app/src/main/res/raw/espeakdata.zip \;
-          echo "✅ Librerías .so y espeakdata.zip generados desde el código fuente."
+          if [ -f "/tmp/espeak_extract/res/raw/espeakdata.zip" ]; then
+            cp "/tmp/espeak_extract/res/raw/espeakdata.zip" \
+               "$GITHUB_WORKSPACE/app/src/main/res/raw/espeakdata.zip"
+            echo "✅ espeakdata.zip extraído del APK"
+          else
+            echo "⚠️ espeakdata.zip no está en el APK. Generando desde el código fuente..."
+            cd /tmp/espeak-ng
+            sudo apt-get update
+            sudo apt-get install -y autoconf automake libtool pkg-config build-essential
+            ./autogen.sh
+            ./configure --prefix=/usr
+            make espeakdata || make android || make dist || true
+
+            ESPEAKDATA_PATH=$(find /tmp/espeak-ng -name "espeakdata.zip" -type f | head -n 1)
+            if [ -z "$ESPEAKDATA_PATH" ]; then
+              echo "❌ No se pudo generar espeakdata.zip por ningún método"
+              exit 1
+            fi
+            cp "$ESPEAKDATA_PATH" $GITHUB_WORKSPACE/app/src/main/res/raw/espeakdata.zip
+            echo "✅ espeakdata.zip generado desde $ESPEAKDATA_PATH"
+          fi
+
+          # 6. Verificación final
+          echo "=== jniLibs ==="
+          ls -la $GITHUB_WORKSPACE/app/src/main/jniLibs/*/
+          echo "=== res/raw ==="
+          ls -la $GITHUB_WORKSPACE/app/src/main/res/raw/
 
       - name: 🏗️ Build Debug APK
         run: gradle assembleDebug --stacktrace
