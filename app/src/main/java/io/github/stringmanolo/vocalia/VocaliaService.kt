@@ -1,5 +1,4 @@
 package io.github.stringmanolo.vocalia
-import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -10,6 +9,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import io.github.stringmanolo.vocalia.tts.TtsManager
+import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 class VocaliaService : Service() {
 
@@ -23,14 +24,22 @@ class VocaliaService : Service() {
             private set
     }
 
+    private lateinit var ttsManager: TtsManager
+
     override fun onCreate() {
         super.onCreate()
         VocaliaLogger.i(TAG, "onCreate")
+
+        ttsManager = TtsManager(this)
+        ttsManager.onEngineReady = { engine ->
+            VocaliaLogger.i(TAG, "Motor TTS listo: ${engine.name}")
+            ttsManager.speak("Vocalia activa")
+        }
+        ttsManager.init()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         VocaliaLogger.i(TAG, "onStartCommand")
-        // Debe llamarse SIEMPRE en menos de 5 s o el sistema lanza excepción
         startForegroundCompat()
         isRunning = true
         return START_STICKY
@@ -38,6 +47,7 @@ class VocaliaService : Service() {
 
     override fun onDestroy() {
         VocaliaLogger.i(TAG, "onDestroy")
+        try { ttsManager.shutdown() } catch (_: Exception) {}
         isRunning = false
         super.onDestroy()
     }
@@ -46,7 +56,7 @@ class VocaliaService : Service() {
 
     private fun startForegroundCompat() {
         val notification = buildNotification()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
