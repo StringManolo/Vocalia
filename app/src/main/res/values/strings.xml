@@ -9,7 +9,4 @@
     <string name="notification_title">Vocalia activa</string>
     <string name="notification_text">El asistente de voz está funcionando</string>
     <string name="accessibility_service_description">Vocalia usa este servicio para leer la pantalla y realizar acciones por ti. Ningún dato sale del dispositivo.</string>
-
-    <string name="sample_text">Dummy text needed for build</string>
-
 </resources>

@@ -303,17 +303,6 @@ public class SpeechSynthesis {
         mInitialized = true;
     }
 
-    public static String getSampleText(Context context, Locale locale) {
-        final DisplayMetrics metrics = context.getResources().getDisplayMetrics();
-        final Configuration config = context.getResources().getConfiguration();
-
-        final String language = getIanaLanguageCode(locale.getLanguage());
-        final String country = getIanaCountryCode(locale.getCountry());
-        config.locale = new Locale(language, country, locale.getVariant());
-
-        Resources res = new Resources(context.getAssets(), metrics, config);
-        return res.getString(R.string.sample_text, config.locale.getDisplayName(config.locale));
-    }
 
     private static native final boolean nativeClassInit();
 
