@@ -102,57 +102,76 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
     // ---------------------------------------------------------------
 
     private fun extractVoiceDataIfNeeded() {
-        if (safeHasBaseResources()) {
-            VocaliaLogger.i("EspeakNgEngine", "Datos de voz ya presentes")
-            return
-        }
+    val dataPath = safeDataPath()
+        ?: File(context.filesDir, "espeak-data").also { it.mkdirs() }
 
-        VocaliaLogger.i("EspeakNgEngine", "Extrayendo espeakdata.zip...")
-        val dataPath = safeDataPath()
-            ?: File(context.filesDir, "espeak-data").also { it.mkdirs() }
+    if (safeHasBaseResources()) {
+        VocaliaLogger.i("EspeakNgEngine", "Datos de voz ya presentes")
+        return
+    }
 
-        val resId = context.resources.getIdentifier("espeakdata", "raw", context.packageName)
-        if (resId == 0) {
-            throw IllegalStateException("res/raw/espeakdata.zip no encontrado en la APK")
-        }
+    // Limpiar restos de extracciones previas con estructura anidada
+    val straySubdir = File(dataPath, "espeak-ng-data")
+    if (straySubdir.exists()) {
+        VocaliaLogger.i("EspeakNgEngine", "Eliminando ${straySubdir.absolutePath} de extracción previa")
+        straySubdir.deleteRecursively()
+    }
 
-        val tempZip = File(context.cacheDir, "espeakdata.zip")
-        context.resources.openRawResource(resId).use { input ->
-            tempZip.outputStream().use { input.copyTo(it) }
-        }
+    VocaliaLogger.i("EspeakNgEngine", "Extrayendo espeakdata.zip...")
+    val resId = context.resources.getIdentifier("espeakdata", "raw", context.packageName)
+    if (resId == 0) {
+        throw IllegalStateException("res/raw/espeakdata.zip no encontrado en la APK")
+    }
 
-        ZipInputStream(tempZip.inputStream().buffered()).use { zis ->
-            var entry = zis.nextEntry
-            while (entry != null) {
-                val target = File(dataPath, entry.name)
-                // Mitigar zip-slip
-                if (!target.canonicalPath.startsWith(dataPath.canonicalPath + File.separator) &&
-                    target.canonicalPath != dataPath.canonicalPath
-                ) {
-                    VocaliaLogger.w("EspeakNgEngine", "Ignorando entrada sospechosa: ${entry.name}")
-                } else if (entry.isDirectory) {
-                    target.mkdirs()
-                } else {
-                    target.parentFile?.mkdirs()
-                    target.outputStream().use { zis.copyTo(it) }
-                }
+    val tempZip = File(context.cacheDir, "espeakdata.zip")
+    context.resources.openRawResource(resId).use { input ->
+        tempZip.outputStream().use { input.copyTo(it) }
+    }
+
+    // El ZIP de espeak-ng tiene una carpeta raíz "espeak-ng-data/" que hay que aplanar
+    val zipPrefix = "espeak-ng-data/"
+
+    ZipInputStream(tempZip.inputStream().buffered()).use { zis ->
+        var entry = zis.nextEntry
+        while (entry != null) {
+            var name = entry.name
+            if (name.startsWith(zipPrefix)) {
+                name = name.substring(zipPrefix.length)
+            }
+            if (name.isEmpty()) {
                 zis.closeEntry()
                 entry = zis.nextEntry
+                continue
             }
-        }
-        tempZip.delete()
-
-        val ok = safeHasBaseResources()
-        VocaliaLogger.i("EspeakNgEngine", "Extracción completada. hasBaseResources=$ok")
-        if (!ok) {
-            // Diagnóstico: listar el primer nivel de dataPath
-            try {
-                dataPath.listFiles()?.take(10)?.forEach { f ->
-                    VocaliaLogger.i("EspeakNgEngine", "  dataPath/${f.name} (dir=${f.isDirectory})")
-                }
-            } catch (_: Exception) {}
+            val target = File(dataPath, name)
+            // Mitigación de zip-slip
+            if (!target.canonicalPath.startsWith(dataPath.canonicalPath + File.separator) &&
+                target.canonicalPath != dataPath.canonicalPath
+            ) {
+                VocaliaLogger.w("EspeakNgEngine", "Ignorando entrada sospechosa: ${entry.name}")
+            } else if (entry.isDirectory) {
+                target.mkdirs()
+            } else {
+                target.parentFile?.mkdirs()
+                target.outputStream().use { zis.copyTo(it) }
+            }
+            zis.closeEntry()
+            entry = zis.nextEntry
         }
     }
+    tempZip.delete()
+
+    val ok = safeHasBaseResources()
+    VocaliaLogger.i("EspeakNgEngine", "Extracción completada. hasBaseResources=$ok")
+    if (!ok) {
+        try {
+            dataPath.listFiles()?.take(20)?.forEach { f ->
+                VocaliaLogger.i("EspeakNgEngine", "  dataPath/${f.name} (dir=${f.isDirectory})")
+            }
+        } catch (_: Exception) {}
+    }
+}
+
 
     private fun safeHasBaseResources(): Boolean = try {
         CheckVoiceData.hasBaseResources(context)
