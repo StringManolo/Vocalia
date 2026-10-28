@@ -24,7 +24,7 @@ class TtsManager(private val context: Context) {
                 flushPending()
                 onEngineReady?.invoke(espeakEngine!!)
                 // 2. Intentar Sherpa en segundo plano (no bloquea).
-                //tryInitSherpa()
+                tryInitSherpa()
             },
             onError = { error ->
                 VocaliaLogger.e("TtsManager", "EspeakNg falló al inicializar: $error")
