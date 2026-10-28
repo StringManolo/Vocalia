@@ -12,6 +12,7 @@ import com.reecedunn.espeak.CheckVoiceData
 import com.reecedunn.espeak.SpeechSynthesis
 import io.github.stringmanolo.vocalia.util.InternalDebug
 import io.github.stringmanolo.vocalia.util.VocaliaLogger
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.zip.ZipInputStream
@@ -30,8 +31,10 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
         Thread(r, "espeak-synth").apply { isDaemon = true }
     }
 
-    // Estado para el drenaje del AudioTrack
-    @Volatile private var bytesPending = 0L
+    // Buffer de acumulación para MODE_STATIC
+    private val audioBuffer = ByteArrayOutputStream()
+
+    // Para cancelar el postDelayed de liberación
     private var releaseRunnable: Runnable? = null
 
     // Foco de audio
@@ -56,20 +59,26 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
                 InternalDebug.mark("init: creating SynthReadyCallback (triggers SpeechSynthesis.<clinit>)")
                 val callback = object : SpeechSynthesis.SynthReadyCallback {
                     override fun onSynthDataReady(audioData: ByteArray) {
-                        InternalDebug.mark("callback.onSynthDataReady size=${audioData.size}")
-                        playChunk(audioData)
+                        InternalDebug.mark("callback.onSynthDataReady size=${audioData.size} total=${audioBuffer.size() + audioData.size}")
+                        synchronized(audioLock) {
+                            audioBuffer.write(audioData)
+                        }
                     }
 
                     override fun onSynthDataComplete() {
-                        InternalDebug.mark("callback.onSynthDataComplete (dejando fluir el buffer)")
-                        programarLiberacionTrasDrenaje()
+                        synchronized(audioLock) {
+                            val allAudio = audioBuffer.toByteArray()
+                            audioBuffer.reset()
+                            InternalDebug.mark("callback.onSynthDataComplete totalBytes=${allAudio.size}")
+                            if (allAudio.isNotEmpty()) {
+                                playStatic(allAudio)
+                            }
+                        }
                     }
 
                     override fun onSynthWordBoundary(
                         textPosition: Int, textLength: Int, markerInFrames: Int
-                    ) {
-                        // Futuro: resaltado de palabra para navegación de lectura
-                    }
+                    ) {}
                 }
                 InternalDebug.mark("init: callback created (static block OK si llegamos aquí)")
 
@@ -188,11 +197,6 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
 
         val ok = safeHasBaseResources()
         InternalDebug.mark("extract END hasBaseResources=$ok")
-        if (!ok) {
-            dataDir.listFiles()?.take(20)?.forEach { f ->
-                InternalDebug.mark("extract:   $dataDir/${f.name} (dir=${f.isDirectory})")
-            }
-        }
     }
 
     private fun safeHasBaseResources(): Boolean = try {
@@ -202,18 +206,10 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
         false
     }
 
-    private fun safeDataPath(): File? = try {
-        CheckVoiceData.getDataPath(context)
-    } catch (t: Throwable) {
-        InternalDebug.mark("getDataPath THREW: ${t.message}")
-        null
-    }
-
     // ---------------------------------------------------------------
     // Volumen y foco de audio
     // ---------------------------------------------------------------
 
-    /** Fuerza el volumen del stream MUSIC si está a 0 (típico en EMUI). */
     private fun ensureMediaVolumeIsUp() {
         try {
             val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -225,11 +221,10 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
                 InternalDebug.mark("ensureMediaVolumeIsUp: subido a $target")
             }
         } catch (t: Throwable) {
-            InternalDebug.mark("ensureMediaVolumeIsUp THREW: ${t.javaClass.simpleName}: ${t.message}")
+            InternalDebug.mark("ensureMediaVolumeIsUp THREW: ${t.message}")
         }
     }
 
-    /** Solicita foco de audio para que el sistema nos deje sonar. */
     private fun requestAudioFocus(): Boolean {
         return try {
             val attrs = AudioAttributes.Builder()
@@ -247,7 +242,7 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
             InternalDebug.mark("requestAudioFocus: result=$result (1=GRANTED)")
             result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         } catch (t: Throwable) {
-            InternalDebug.mark("requestAudioFocus THREW: ${t.javaClass.simpleName}: ${t.message}")
+            InternalDebug.mark("requestAudioFocus THREW: ${t.message}")
             false
         }
     }
@@ -266,119 +261,113 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
     }
 
     // ---------------------------------------------------------------
-    // Reproducción de audio
+    // Reproducción con MODE_STATIC
     // ---------------------------------------------------------------
 
-    private fun playChunk(audioData: ByteArray) {
+    private fun playStatic(pcm: ByteArray) {
+        val sampleRate = synth?.sampleRate ?: return
+        if (sampleRate <= 0) {
+            InternalDebug.mark("playStatic: ABORT sampleRate inválido")
+            return
+        }
+
         ensureMediaVolumeIsUp()
+        requestAudioFocus()
 
+        // Cancelar cualquier liberación pendiente
+        releaseRunnable?.let { mainHandler.removeCallbacks(it) }
+        releaseRunnable = null
+
+        // Liberar el AudioTrack anterior si existe
         synchronized(audioLock) {
-            try {
-                if (audioTrack == null) {
-                    val sampleRate = synth?.sampleRate
-                    InternalDebug.mark("playChunk: creating AudioTrack rate=$sampleRate size=${audioData.size}")
-                    if (sampleRate == null || sampleRate <= 0) {
-                        InternalDebug.mark("playChunk: ABORT sampleRate inválido=$sampleRate")
-                        return
-                    }
-                    val minBuf = AudioTrack.getMinBufferSize(
-                        sampleRate,
-                        AudioFormat.CHANNEL_OUT_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT
-                    )
-                    InternalDebug.mark("playChunk: minBuf=$minBuf")
-                    if (minBuf <= 0) {
-                        InternalDebug.mark("playChunk: ABORT minBuf inválido")
-                        return
-                    }
-                    val bufSize = maxOf(minBuf, audioData.size * 4)
+            try { audioTrack?.stop() } catch (_: Exception) {}
+            try { audioTrack?.release() } catch (_: Exception) {}
+            audioTrack = null
+        }
 
-                    val attrs = AudioAttributes.Builder()
+        val minBuf = AudioTrack.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_OUT_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+        val bufSize = maxOf(minBuf, pcm.size)
+        InternalDebug.mark("playStatic: sampleRate=$sampleRate, pcmBytes=${pcm.size}, bufSize=$bufSize")
+
+        try {
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
-
-                    audioTrack = AudioTrack.Builder()
-                        .setAudioAttributes(attrs)
-                        .setAudioFormat(
-                            AudioFormat.Builder()
-                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                                .setSampleRate(sampleRate)
-                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                                .build()
-                        )
-                        .setBufferSizeInBytes(bufSize)
-                        .setTransferMode(AudioTrack.MODE_STREAM)
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                         .build()
+                )
+                .setBufferSizeInBytes(bufSize)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
 
-                    InternalDebug.mark("playChunk: state=${audioTrack?.state} (1=INITIALIZED_OK)")
-                    audioTrack?.setVolume(1.0f)
-                    InternalDebug.mark("playChunk: volume fijado a 1.0")
-
-                    // Pedir foco de audio y precalentar el hardware
-                    requestAudioFocus()
-
-                    InternalDebug.mark("playChunk: precalentando AudioTrack")
-                    audioTrack?.play()
-                    try { Thread.sleep(80) } catch (_: InterruptedException) {}
-                    audioTrack?.stop()
-                    audioTrack?.play()
-                    InternalDebug.mark("playChunk: AudioTrack precalentado y reproduciendo")
-
-                    bytesPending = 0L
-                }
-
-                val written = audioTrack?.write(audioData, 0, audioData.size) ?: 0
-                if (written > 0) bytesPending += written
-                InternalDebug.mark("playChunk: write size=${audioData.size} result=$written totalPending=$bytesPending")
-            } catch (t: Throwable) {
-                InternalDebug.mark("playChunk: THREW ${t.javaClass.simpleName}: ${t.message}")
-                VocaliaLogger.e("EspeakNgEngine", "Error en playChunk: ${t.message}", t as? Exception)
+            InternalDebug.mark("playStatic: state=${track.state} (1=INITIALIZED_OK)")
+            if (track.state != AudioTrack.STATE_INITIALIZED) {
+                InternalDebug.mark("playStatic: ABORT state inválido")
+                track.release()
+                return
             }
-        }
-    }
 
-    /**
-     * Programa el release del AudioTrack para cuando el buffer se haya
-     * drenado al hardware.
-     */
-    private fun programarLiberacionTrasDrenaje() {
-        releaseRunnable?.let { mainHandler.removeCallbacks(it) }
+            track.setVolume(1.0f)
+            val written = track.write(pcm, 0, pcm.size)
+            InternalDebug.mark("playStatic: write result=$written de ${pcm.size}")
+            if (written <= 0) {
+                InternalDebug.mark("playStatic: ABORT write falló")
+                track.release()
+                return
+            }
 
-        val track = audioTrack ?: return
-        val sampleRate = synth?.sampleRate ?: return
-        if (sampleRate <= 0) return
+            track.play()
+            InternalDebug.mark("playStatic: play() invocado")
 
-        val pendientes = bytesPending
-        bytesPending = 0L
-        val durationMs = (pendientes * 1000L) / (sampleRate.toLong() * 2L) + 300L
-
-        InternalDebug.mark("programarLiberacion: $pendientes bytes pendientes, esperando ${durationMs}ms")
-
-        val runnable = Runnable {
             synchronized(audioLock) {
-                if (audioTrack === track) {
-                    try { track.stop() } catch (_: Exception) {}
-                    try { track.release() } catch (_: Exception) {}
-                    audioTrack = null
-                    abandonAudioFocus()
-                    InternalDebug.mark("AudioTrack liberado tras drenaje")
-                }
+                audioTrack = track
             }
+
+            // Duración: bytes / (sampleRate * 2) segundos, en ms
+            val durationMs = (pcm.size * 1000L) / (sampleRate.toLong() * 2L)
+            InternalDebug.mark("playStatic: programando liberación en ${durationMs + 200}ms")
+
+            val runnable = Runnable {
+                synchronized(audioLock) {
+                    if (audioTrack === track) {
+                        try { track.stop() } catch (_: Exception) {}
+                        try { track.release() } catch (_: Exception) {}
+                        audioTrack = null
+                        InternalDebug.mark("playStatic: AudioTrack liberado tras ${durationMs}ms")
+                    }
+                }
+                abandonAudioFocus()
+            }
+            releaseRunnable = runnable
+            mainHandler.postDelayed(runnable, durationMs + 200L)
+
+        } catch (t: Throwable) {
+            InternalDebug.mark("playStatic: THREW ${t.javaClass.simpleName}: ${t.message}")
+            VocaliaLogger.e("EspeakNgEngine", "Error en playStatic", t as? Exception)
         }
-        releaseRunnable = runnable
-        mainHandler.postDelayed(runnable, durationMs)
     }
 
-    private fun cancelarLiberacionProgramadaYParar() {
+    private fun stopAndReleaseNow() {
         releaseRunnable?.let { mainHandler.removeCallbacks(it) }
         releaseRunnable = null
         synchronized(audioLock) {
             try { audioTrack?.stop() } catch (_: Exception) {}
             try { audioTrack?.release() } catch (_: Exception) {}
             audioTrack = null
+            audioBuffer.reset()
         }
-        bytesPending = 0L
         abandonAudioFocus()
     }
 
@@ -395,7 +384,7 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
 
         if (interruptible) {
             try { s.stop() } catch (_: Exception) {}
-            cancelarLiberacionProgramadaYParar()
+            stopAndReleaseNow()
         }
 
         synthExecutor.execute {
@@ -410,7 +399,7 @@ class EspeakNgEngine(private val context: Context) : TtsEngine {
 
     override fun stop() {
         try { synth?.stop() } catch (_: Exception) {}
-        cancelarLiberacionProgramadaYParar()
+        stopAndReleaseNow()
     }
 
     override fun setSpeed(rate: Float) {
