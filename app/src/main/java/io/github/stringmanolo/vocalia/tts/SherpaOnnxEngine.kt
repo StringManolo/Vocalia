@@ -4,11 +4,11 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
-import android.util.Log
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
+import io.github.stringmanolo.vocalia.util.InternalDebug
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,10 +21,6 @@ import kotlin.math.abs
 
 class SherpaOnnxEngine(private val context: Context) : TtsEngine {
 
-    companion object {
-        private const val TAG = "SherpaOnnxEngine"
-    }
-
     override val name = "SherpaOnnx"
     @Volatile override var onComplete: (() -> Unit)? = null
 
@@ -36,9 +32,13 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
     @Volatile private var shuttingDown = false
     @Volatile private var currentSpeed = 1.0f
 
+    private fun dbg(msg: String) {
+        InternalDebug.mark("[${Thread.currentThread().name}] Sherpa: $msg")
+    }
+
     override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
         try {
-            Log.i(TAG, "init: construyendo OfflineTts")
+            dbg("init: construyendo OfflineTts")
             val config = OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
                     vits = OfflineTtsVitsModelConfig(
@@ -51,30 +51,27 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
             )
             val instance = OfflineTts(context.assets, config)
             tts = instance
-            Log.i(TAG, "init: OfflineTts creado")
+            dbg("init: OfflineTts creado")
 
-            // Prueba de humo: generar un texto corto para verificar que el modelo funciona.
             Thread({
                 try {
                     val t0 = System.currentTimeMillis()
                     val test = instance.generate("prueba", 0, 1.0f)
                     val dt = System.currentTimeMillis() - t0
-                    Log.i(TAG, "init smoke test: samples=${test.samples.size} rate=${test.sampleRate} took=${dt}ms")
-                    if (test.samples.isNotEmpty()) {
-                        var peak = 0f
-                        for (s in test.samples) if (abs(s) > peak) peak = abs(s)
-                        Log.i(TAG, "init smoke test: peak=$peak")
-                    } else {
-                        Log.e(TAG, "init smoke test: generate() devuelve 0 muestras. El modelo NO funciona.")
+                    var peak = 0f
+                    for (s in test.samples) if (abs(s) > peak) peak = abs(s)
+                    dbg("smoke: samples=${test.samples.size} rate=${test.sampleRate} peak=$peak took=${dt}ms")
+                    if (test.samples.isEmpty()) {
+                        dbg("smoke: generate() devuelve 0 muestras — el modelo NO funciona")
                     }
                 } catch (t: Throwable) {
-                    Log.e(TAG, "init smoke test THREW", t)
+                    dbg("smoke THREW ${t.javaClass.simpleName}: ${t.message}")
                 }
             }, "sherpa-smoke").start()
 
             onReady()
         } catch (t: Throwable) {
-            Log.e(TAG, "init falló: ${t.message}", t)
+            dbg("init falló ${t.javaClass.simpleName}: ${t.message}")
             onError(t.message ?: "Error desconocido en SherpaOnnx")
         }
     }
@@ -86,7 +83,7 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
         }
         val engine = tts
         if (engine == null) {
-            Log.w(TAG, "speak sin modelo")
+            dbg("speak sin modelo")
             notifyComplete()
             return
         }
@@ -94,7 +91,7 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
         currentJob?.cancel()
         currentJob = scope.launch {
             try {
-                Log.i(TAG, "speak(\"$text\") generating...")
+                dbg("speak(\"$text\") generating...")
                 val t0 = System.currentTimeMillis()
                 val audio = engine.generate(text, 0, currentSpeed)
                 val dt = System.currentTimeMillis() - t0
@@ -102,18 +99,18 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
                 var peak = 0f
                 for (s in audio.samples) if (abs(s) > peak) peak = abs(s)
 
-                Log.i(TAG, "generate: samples=${audio.samples.size} rate=${audio.sampleRate} peak=$peak took=${dt}ms")
+                dbg("generate: samples=${audio.samples.size} rate=${audio.sampleRate} peak=$peak took=${dt}ms")
 
                 if (audio.samples.isNotEmpty() && peak > 0f) {
                     playAudio(audio.samples, audio.sampleRate)
                 } else {
-                    Log.e(TAG, "generate devolvió audio vacío o silencio (samples=${audio.samples.size}, peak=$peak)")
+                    dbg("generate vacío/silencio (samples=${audio.samples.size}, peak=$peak)")
                 }
             } catch (e: CancellationException) {
-                Log.d(TAG, "speak cancelado")
+                dbg("speak cancelado")
                 throw e
             } catch (t: Throwable) {
-                Log.e(TAG, "speak falló: ${t.message}", t)
+                dbg("speak THREW ${t.javaClass.simpleName}: ${t.message}")
             } finally {
                 notifyComplete()
             }
@@ -121,7 +118,7 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
     }
 
     override fun stop() {
-        Log.d(TAG, "stop()")
+        dbg("stop()")
         currentJob?.cancel()
         currentJob = null
         try { currentTrack?.stop() } catch (_: Throwable) {}
@@ -135,7 +132,7 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
     }
 
     override fun shutdown() {
-        Log.d(TAG, "shutdown()")
+        dbg("shutdown()")
         shuttingDown = true
         stop()
         try { tts?.release() } catch (_: Throwable) {}
@@ -143,12 +140,7 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
         scope.cancel()
     }
 
-    /**
-     * Reproduce el audio de Sherpa con el patrón que funciona en el P40:
-     * float→int16, MODE_STREAM, CONTENT_TYPE_MUSIC, bufSize=pcm.size.
-     */
     private suspend fun playAudio(samples: FloatArray, sampleRate: Int) {
-        // Convertir float [-1.0, 1.0] a PCM 16-bit little endian
         val pcmBytes = ByteArray(samples.size * 2)
         for (i in samples.indices) {
             val clamped = samples[i].coerceIn(-1f, 1f)
@@ -182,16 +174,16 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
 
-            Log.i(TAG, "playAudio: state=${track.state} pcm=${pcmBytes.size}B rate=$sampleRate bufSize=$bufSize")
+            dbg("playAudio: state=${track.state} pcm=${pcmBytes.size}B rate=$sampleRate bufSize=$bufSize")
             if (track.state != AudioTrack.STATE_INITIALIZED) {
-                Log.e(TAG, "playAudio: AudioTrack no inicializado")
+                dbg("playAudio: AudioTrack NO inicializado")
                 return
             }
 
             currentTrack = track
             track.play()
             val written = track.write(pcmBytes, 0, pcmBytes.size)
-            Log.i(TAG, "playAudio: write=$written/${pcmBytes.size}")
+            dbg("playAudio: write=$written/${pcmBytes.size}")
 
             val frames = pcmBytes.size / 2
             val expectedMs = frames * 1000L / sampleRate
@@ -203,12 +195,12 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
                 if (lastHead >= frames) break
                 delay(40)
             }
-            Log.i(TAG, "playAudio: head=$lastHead/$frames")
+            dbg("playAudio: head=$lastHead/$frames")
             delay(100)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
-            Log.e(TAG, "playAudio falló: ${t.message}", t)
+            dbg("playAudio THREW ${t.javaClass.simpleName}: ${t.message}")
         } finally {
             try { track?.stop() } catch (_: Throwable) {}
             try { track?.release() } catch (_: Throwable) {}
