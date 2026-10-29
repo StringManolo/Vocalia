@@ -14,16 +14,23 @@ class VocaliaCore(
 ) {
     private enum class State { IDLE, LISTENING, EXECUTING }
 
+    companion object {
+        /**
+         * Diagnóstico: si true, IDLE usa modo libre (sin gramática) y loguea TODO
+         * lo que oye Vosk. Sirve para descubrir cómo transcribe el modelo la wake
+         * word real. Poner a false una vez elegida la wake word definitiva.
+         */
+        private const val DIAG_IDLE_FREE = true
+    }
+
     private var state = State.IDLE
     private val mainHandler = Handler(Looper.getMainLooper())
     private var timeoutRunnable: Runnable? = null
     private var safetyRunnable: Runnable? = null
 
     fun start() {
-        log("start")
-        voskEngine.init {
-            enterIdle()
-        }
+        log("start (DIAG_IDLE_FREE=$DIAG_IDLE_FREE)")
+        voskEngine.init { enterIdle() }
     }
 
     fun stop() {
@@ -33,22 +40,32 @@ class VocaliaCore(
         ttsManager.stop()
     }
 
-    // --- Estados ---
-
     private fun enterIdle() {
         log("enterIdle")
         state = State.IDLE
         cancelTimeouts()
-        voskEngine.setMode(VoskEngine.Mode.WAKE)
+
+        voskEngine.setMode(if (DIAG_IDLE_FREE) VoskEngine.Mode.COMMAND else VoskEngine.Mode.WAKE)
+
+        voskEngine.onPartialResult = { json ->
+            if (state == State.IDLE) {
+                val text = extractPartial(json)
+                if (text.isNotBlank() && text != "[unk]") {
+                    log("IDLE partial: \"$text\"")
+                }
+            }
+        }
+
         voskEngine.onResult = { json ->
             if (state == State.IDLE) {
+                val text = extractText(json)
+                if (text.isNotBlank()) {
+                    log("IDLE result: \"$text\"")
+                }
                 val (hasWake, remainder) = extractWake(json)
                 if (hasWake) {
-                    if (remainder.isNotBlank()) {
-                        handleCommand(remainder)
-                    } else {
-                        enterListening()
-                    }
+                    if (remainder.isNotBlank()) handleCommand(remainder)
+                    else enterListening()
                 }
             }
         }
@@ -57,12 +74,9 @@ class VocaliaCore(
     private fun enterListening() {
         log("enterListening")
         state = State.LISTENING
-        voskEngine.pause()  // no escuchar mientras habla el TTS
-
+        voskEngine.pause()
         ttsManager.speak("te escucho") {
-            if (state == State.LISTENING) {
-                startCommandListening()
-            }
+            if (state == State.LISTENING) startCommandListening()
         }
     }
 
@@ -72,9 +86,7 @@ class VocaliaCore(
         voskEngine.onResult = { json ->
             if (state == State.LISTENING) {
                 val text = extractText(json)
-                if (text.isNotBlank()) {
-                    handleCommand(text)
-                }
+                if (text.isNotBlank()) handleCommand(text)
             }
         }
         timeoutRunnable = Runnable {
@@ -91,7 +103,6 @@ class VocaliaCore(
         state = State.EXECUTING
         voskEngine.pause()
 
-        // Red de seguridad: si el TTS nunca llama a onComplete, salimos igual.
         safetyRunnable = Runnable {
             if (state == State.EXECUTING) {
                 log("safety timeout EXECUTING")
@@ -100,18 +111,13 @@ class VocaliaCore(
         }.also { mainHandler.postDelayed(it, 30_000L) }
 
         when (val result = commandParser.parse(text)) {
-            CommandResult.Sleep -> {
-                ttsManager.speak("descanso") { enterIdle() }
-            }
-            is CommandResult.Response -> {
-                ttsManager.speak(result.text) { enterIdle() }
-            }
+            CommandResult.Sleep -> ttsManager.speak("descanso") { enterIdle() }
+            is CommandResult.Response -> ttsManager.speak(result.text) { enterIdle() }
         }
     }
 
     // --- Utilidades ---
 
-    /** Devuelve (hasWake, resto). "vocalia" → (true, ""); "vocalia que hora es" → (true, "que hora es"). */
     private fun extractWake(json: String): Pair<Boolean, String> {
         val text = extractText(json)
         if (text.isBlank()) return false to ""
@@ -122,11 +128,13 @@ class VocaliaCore(
         return true to remainder
     }
 
-    private fun extractText(json: String): String {
-        return try {
-            JSONObject(json).optString("text", "").trim()
-        } catch (_: Exception) { "" }
-    }
+    private fun extractText(json: String): String = try {
+        JSONObject(json).optString("text", "").trim()
+    } catch (_: Exception) { "" }
+
+    private fun extractPartial(json: String): String = try {
+        JSONObject(json).optString("partial", "").trim()
+    } catch (_: Exception) { "" }
 
     private fun cancelTimeouts() {
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
