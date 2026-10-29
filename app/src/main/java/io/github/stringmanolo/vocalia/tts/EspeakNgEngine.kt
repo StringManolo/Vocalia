@@ -8,8 +8,6 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
-import android.media.MediaPlayer
-import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -17,32 +15,26 @@ import android.os.SystemClock
 import android.util.Log
 import com.reecedunn.espeak.CheckVoiceData
 import com.reecedunn.espeak.SpeechSynthesis
+import com.reecedunn.espeak.Voice
+import com.reecedunn.espeak.VoiceVariant
 import io.github.stringmanolo.vocalia.util.InternalDebug
 import io.github.stringmanolo.vocalia.util.VocaliaLogger
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipInputStream
-import kotlin.math.abs
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 class EspeakNgEngine(context: Context) : TtsEngine {
 
     override val name = "EspeakNg"
 
     companion object {
-        /** true = corre el test suite de audio al arrancar (15 configuraciones). */
-        const val RUN_AUDIO_TEST_SUITE = true
-
-        /** true = tonos de prueba al arrancar + volcado WAV + MediaPlayer tras cada locución. */
         const val DIAG_ENABLED = false
+        const val TTS_LANGUAGE = "es"
+        const val TTS_VARIANT = "female"
 
         private const val TAG = "EspeakNgEngine"
-
         private val initLock = Any()
 
         @Volatile private var sharedSynth: SpeechSynthesis? = null
@@ -51,37 +43,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         private val synthExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "espeak-synth").apply { isDaemon = true }
         }
-    }
-
-    private class TestConfig(
-        val id: Int,
-        val description: String,
-        val usage: Int,
-        val contentType: Int,
-        val transferMode: Int,
-        val bufSizeStrategy: String, // "minBuf" | "minBuf*2" | "minBuf*4" | "size" | "64k"
-        val setVolume: Boolean,
-        val requestFocus: Boolean,
-        val writeMode: String // "oneshot" | "incremental"
-    )
-
-    private class TestMode(
-        val config: TestConfig,
-        val buffer: ByteArrayOutputStream
-    )
-
-    private class DrainJob(
-        val id: Int,
-        val track: AudioTrack,
-        val bytes: Long,
-        val chunks: Int,
-        val peak: Int,
-        val rms: Int,
-        val zeroPct: Int,
-        val wav: ByteArray,
-        val rate: Int
-    ) {
-        @Volatile var cancelled = false
     }
 
     private val ctx: Context = context.applicationContext
@@ -93,28 +54,14 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     @Volatile private var initialized = false
     @Volatile private var shuttingDown = false
     @Volatile private var pendingText: String? = null
-    @Volatile private var lastSpeakAt = 0L
 
     private val generation = AtomicInteger(0)
     @Volatile private var synthGeneration = 0
 
-    private val audioLock = Any()
-    private var track: AudioTrack? = null
-    private val liveJobs = mutableListOf<DrainJob>()
     private var focusRequest: AudioFocusRequest? = null
-    @Volatile private var drainThread: Thread? = null
 
-    private var uttId = 0
-    private var uttBytes = 0L
-    private var uttChunks = 0
-    private var uttPeak = 0
-    private var uttSumSq = 0.0
-    private var uttZeroSamples = 0L
-    private var uttSamples = 0L
-    private var uttWav = ByteArrayOutputStream()
-
-    // Modo test: cuando no es null, onPcm acumula en buffer en vez de reproducir.
-    @Volatile private var testMode: TestMode? = null
+    // Buffer donde onPcm acumula el PCM durante synthesize()
+    @Volatile private var pcmBuffer: ByteArrayOutputStream? = null
 
     private fun dbg(msg: String) {
         InternalDebug.mark("[${Thread.currentThread().name}] $msg")
@@ -127,7 +74,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
 
     override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
         InternalDebug.init(ctx)
-        dbg("init START engine=${System.identityHashCode(this)} diag=$DIAG_ENABLED testSuite=$RUN_AUDIO_TEST_SUITE pid=${android.os.Process.myPid()}")
+        dbg("init START engine=${System.identityHashCode(this)} diag=$DIAG_ENABLED pid=${android.os.Process.myPid()}")
         Thread({ initWorker(onReady, onError) }, "espeak-init").start()
     }
 
@@ -149,19 +96,19 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 return
             }
 
+            selectVoice(s, TTS_LANGUAGE, TTS_VARIANT)
+
             try { s.Rate.setValue(175) } catch (t: Throwable) { dbgErr("init: Rate.setValue THREW", t) }
 
-            activeEngine = this
-
-            diagAudioState("init")
-
-            if (RUN_AUDIO_TEST_SUITE) {
-                dbg("init: ===== INICIANDO AUDIO TEST SUITE (15 configs) =====")
-                runAudioTestSuite(s)
-                dbg("init: ===== AUDIO TEST SUITE COMPLETADO =====")
+            try {
+                val voices = s.availableVoices
+                dbg("init: ${voices.size} voices disponibles")
+            } catch (t: Throwable) {
+                dbgErr("init: availableVoices THREW", t)
             }
 
-            if (DIAG_ENABLED) runStartupAudioTests()
+            activeEngine = this
+            diagAudioState("init")
 
             initialized = true
             dbg("init: READY, publicando onReady en el hilo principal")
@@ -182,6 +129,45 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
+    private fun selectVoice(s: SpeechSynthesis, language: String, variant: String) {
+        try {
+            val voices = s.availableVoices
+            dbg("selectVoice: buscando language=$language variant=$variant entre ${voices.size} voces")
+
+            val target: Voice? = voices.firstOrNull { it.identifier == languageIdentifierFor(language) }
+                ?: voices.firstOrNull { it.locale?.language == language }
+                ?: voices.firstOrNull { it.identifier.endsWith("/$language") }
+
+            if (target == null) {
+                dbg("selectVoice: NO se encontró voz para language=$language")
+                return
+            }
+
+            val v = VoiceVariant.parseVoiceVariant(variant)
+            if (v == null) {
+                dbg("selectVoice: parseVoiceVariant(\"$variant\") devolvió null")
+                return
+            }
+
+            s.setVoice(target, v)
+            dbg("selectVoice: OK identifier=${target.identifier} name=${target.name} locale=${target.locale} variant=$v")
+        } catch (t: Throwable) {
+            dbgErr("selectVoice THREW", t)
+        }
+    }
+
+    private fun languageIdentifierFor(lang: String): String = when (lang) {
+        "es" -> "roa/es"
+        "ca" -> "roa/ca"
+        "en" -> "gmw/en"
+        "fr" -> "roa/fr"
+        "it" -> "roa/it"
+        "pt" -> "roa/pt"
+        "de" -> "gmw/de"
+        "ru" -> "zle/ru"
+        else -> lang
+    }
+
     private fun obtainSharedSynth(): SpeechSynthesis {
         return synchronized(initLock) {
             val existing = sharedSynth
@@ -196,7 +182,8 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                     }
 
                     override fun onSynthDataComplete() {
-                        activeEngine?.onPcmComplete(true)
+                        // No hacer nada: la reproducción se orquesta desde speak()
+                        // después de que synthesize() retorne.
                     }
 
                     override fun onSynthWordBoundary(
@@ -222,206 +209,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             }
         }
     }
-
-    // ===============================================================
-    // AUDIO TEST SUITE
-    // ===============================================================
-
-    private fun buildTestConfigs(): List<TestConfig> = listOf(
-        // Grupo A: STREAM, write de una vez, contentType MUSIC
-        TestConfig(1, "STREAM oneshot MUSIC buf=size vol=no focus=no",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
-        TestConfig(2, "STREAM oneshot MUSIC buf=size vol=no focus=sí",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "size", false, true, "oneshot"),
-        TestConfig(3, "STREAM oneshot MUSIC buf=size vol=sí focus=sí",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "size", true, true, "oneshot"),
-        TestConfig(4, "STREAM oneshot MUSIC buf=minBuf vol=no focus=no",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "minBuf", false, false, "oneshot"),
-        TestConfig(5, "STREAM oneshot MUSIC buf=64k vol=no focus=no",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "64k", false, false, "oneshot"),
-
-        // Grupo B: STATIC, write de una vez
-        TestConfig(6, "STATIC oneshot MUSIC buf=size vol=no focus=no",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STATIC, "size", false, false, "oneshot"),
-        TestConfig(7, "STATIC oneshot MUSIC buf=size vol=sí focus=sí",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STATIC, "size", true, true, "oneshot"),
-        TestConfig(8, "STATIC oneshot MUSIC buf=size vol=no focus=sí",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STATIC, "size", false, true, "oneshot"),
-
-        // Grupo C: contentType SPEECH
-        TestConfig(9, "STREAM oneshot SPEECH buf=size vol=no focus=no",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_SPEECH,
-            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
-        TestConfig(10, "STATIC oneshot SPEECH buf=size vol=no focus=no",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_SPEECH,
-            AudioTrack.MODE_STATIC, "size", false, false, "oneshot"),
-
-        // Grupo D: otros usages
-        TestConfig(11, "STREAM oneshot ASSIST_ACCESSIBILITY MUSIC buf=size",
-            AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
-        TestConfig(12, "STREAM oneshot ASSIST_SONIFICATION MUSIC buf=size",
-            AudioAttributes.USAGE_ASSISTANCE_SONIFICATION, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
-        TestConfig(13, "STREAM oneshot VOICE_COMMUNICATION MUSIC buf=size",
-            AudioAttributes.USAGE_VOICE_COMMUNICATION, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
-        TestConfig(14, "STREAM oneshot GAME MUSIC buf=size",
-            AudioAttributes.USAGE_GAME, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
-
-        // Grupo E: incremental (control — reproduce el bug)
-        TestConfig(15, "STREAM incremental MUSIC buf=64k vol=sí focus=sí",
-            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
-            AudioTrack.MODE_STREAM, "64k", true, true, "incremental"),
-    )
-
-    private fun runAudioTestSuite(s: SpeechSynthesis) {
-        val configs = buildTestConfigs()
-        for (config in configs) {
-            try {
-                dbg("=== TEST ${config.id}: ${config.description} ===")
-
-                // 1. Sintetizar "N. Vocalia activa" y acumular el PCM en testMode.buffer
-                val buffer = ByteArrayOutputStream()
-                testMode = TestMode(config, buffer)
-                s.synthesize("${config.id}. Vocalia activa", false)
-                testMode = null
-
-                val pcm = buffer.toByteArray()
-                if (pcm.isEmpty()) {
-                    dbg("TEST ${config.id}: PCM vacío, saltando")
-                    continue
-                }
-
-                // 2. Reproducir el PCM con la configuración de este test
-                playWithConfig(pcm, config, s.sampleRate)
-
-                // 3. Pausa para que el usuario distinga cada prueba
-                Thread.sleep(1500)
-            } catch (t: Throwable) {
-                dbgErr("TEST ${config.id} THREW", t)
-                testMode = null
-            }
-        }
-    }
-
-    private fun playWithConfig(pcm: ByteArray, config: TestConfig, rate: Int) {
-        var t: AudioTrack? = null
-        try {
-            if (config.setVolume) ensureMediaVolumeIsUp()
-            if (config.requestFocus) requestAudioFocusLocked()
-
-            val minBuf = AudioTrack.getMinBufferSize(
-                rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
-            )
-            val bufSize = when (config.bufSizeStrategy) {
-                "minBuf" -> minBuf
-                "minBuf*2" -> minBuf * 2
-                "minBuf*4" -> minBuf * 4
-                "64k" -> 64 * 1024
-                "size" -> pcm.size
-                else -> pcm.size
-            }
-
-            t = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(config.usage)
-                        .setContentType(config.contentType)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(rate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
-                .setBufferSizeInBytes(bufSize)
-                .setTransferMode(config.transferMode)
-                .build()
-
-            dbg("TEST ${config.id}: track state=${t.state} bufSize=$bufSize pcmSize=${pcm.size} minBuf=$minBuf")
-
-            // MODE_STATIC empieza en STATE_NO_STATIC_DATA (2) hasta el primer write
-            val stateOk = if (config.transferMode == AudioTrack.MODE_STATIC) {
-                t.state == AudioTrack.STATE_NO_STATIC_DATA || t.state == AudioTrack.STATE_INITIALIZED
-            } else {
-                t.state == AudioTrack.STATE_INITIALIZED
-            }
-            if (!stateOk) {
-                dbg("TEST ${config.id}: ABORT state inválido=${t.state}")
-                try { t.release() } catch (_: Throwable) {}
-                return
-            }
-
-            if (config.setVolume) t.setVolume(1.0f)
-
-            t.play()
-            dbg("TEST ${config.id}: play() playState=${safePlayState(t)}")
-
-            when (config.writeMode) {
-                "oneshot" -> {
-                    val written = t.write(pcm, 0, pcm.size)
-                    dbg("TEST ${config.id}: write oneshot=$written de ${pcm.size}")
-                }
-                "incremental" -> {
-                    var offset = 0
-                    while (offset < pcm.size) {
-                        val chunk = minOf(4096, pcm.size - offset)
-                        val written = t.write(pcm, offset, chunk)
-                        if (written <= 0) {
-                            dbg("TEST ${config.id}: write incremental FALLÓ en offset=$offset")
-                            break
-                        }
-                        offset += written
-                        Thread.sleep(20)
-                    }
-                    dbg("TEST ${config.id}: write incremental completado offset=$offset")
-                }
-            }
-
-            // Monitorizar head durante 2s
-            val t0 = SystemClock.elapsedRealtime()
-            var maxHead = 0
-            while (SystemClock.elapsedRealtime() - t0 < 2000) {
-                val head = safeHead(t)
-                if (head > maxHead) maxHead = head
-                Thread.sleep(100)
-            }
-            val frames = pcm.size / 2
-            dbg("TEST ${config.id}: head final=$maxHead/$frames playState=${safePlayState(t)} underruns=${try { t.underrunCount } catch (_: Throwable) { -1 }}")
-            if (maxHead > 0) {
-                dbg("TEST ${config.id}: ✅ EL SISTEMA CONSUMIÓ EL AUDIO")
-            } else {
-                dbg("TEST ${config.id}: ❌ head=0, el sistema NO consumió el audio")
-            }
-
-            try { t.stop() } catch (_: Throwable) {}
-            try { t.release() } catch (_: Throwable) {}
-            t = null
-
-            if (config.requestFocus) abandonAudioFocusLocked()
-        } catch (ex: Throwable) {
-            dbgErr("TEST ${config.id} playWithConfig THREW", ex)
-            try { t?.stop() } catch (_: Throwable) {}
-            try { t?.release() } catch (_: Throwable) {}
-            if (config.requestFocus) abandonAudioFocusLocked()
-        }
-    }
-
-    // ===============================================================
-    // Resto del código: idéntico al de Claude
-    // ===============================================================
 
     private fun extractVoiceDataIfNeeded() {
         val filesRoot = ctx.filesDir
@@ -500,7 +287,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         try {
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build()
             val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 .setAudioAttributes(attrs)
@@ -518,6 +305,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         val req = focusRequest ?: return
         try {
             audioManager.abandonAudioFocusRequest(req)
+            dbg("abandonAudioFocus")
         } catch (t: Throwable) {
             dbgErr("abandonAudioFocus THREW", t)
         } finally {
@@ -544,26 +332,37 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    private fun runStartupAudioTests() {
-        try {
-            ensureMediaVolumeIsUp()
-            diagTone()
-            Thread.sleep(300)
-            diagToneGenerator()
-        } catch (t: Throwable) {
-            dbgErr("runStartupAudioTests THREW", t)
-        }
+    private fun safeHead(t: AudioTrack): Int = try { t.playbackHeadPosition } catch (_: Throwable) { -1 }
+    private fun safePlayState(t: AudioTrack): Int = try { t.playState } catch (_: Throwable) { -1 }
+
+    /** Llamado por el callback nativo durante synthesize(). Solo acumula. */
+    private fun onPcm(pcm: ByteArray) {
+        if (shuttingDown) return
+        if (synthGeneration != generation.get()) return
+        val buf = pcmBuffer
+        if (buf != null) buf.write(pcm)
     }
 
-    private fun diagTone() {
-        var tr: AudioTrack? = null
+    /**
+     * Reproduce el PCM acumulado. IMPORTANTE: se llama desde speak() DESPUÉS de
+     * que synthesize() haya retornado. Reproducir dentro del callback nativo
+     * (durante synthesize) hace que EMUI nunca conecte el AudioTrack al mezclador
+     * y head se queda en 0 para siempre.
+     */
+    private fun playCleanly(pcm: ByteArray, gen: Int) {
+        var t: AudioTrack? = null
         try {
-            val rate = 22050
-            val n = rate
-            val tone = ShortArray(n) { i ->
-                (sin(2.0 * Math.PI * 440.0 * i / rate) * 12000).toInt().toShort()
-            }
-            val t = AudioTrack.Builder()
+            ensureMediaVolumeIsUp()
+            requestAudioFocusLocked()
+
+            val rate = sharedSynth?.sampleRate ?: 22050
+            val minBuf = AudioTrack.getMinBufferSize(
+                rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            val bufSize = maxOf(minBuf, pcm.size)
+            dbg("playCleanly: pcmSize=${pcm.size} bufSize=$bufSize rate=$rate")
+
+            t = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -577,346 +376,139 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                         .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                         .build()
                 )
-                .setBufferSizeInBytes(n * 2)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build()
-            tr = t
-            t.play()
-            t.write(tone, 0, n)
-            Thread.sleep(1200)
-        } catch (t: Throwable) {
-            dbgErr("diagTone THREW", t)
-        } finally {
-            try { tr?.stop() } catch (_: Throwable) {}
-            try { tr?.release() } catch (_: Throwable) {}
-        }
-    }
-
-    private fun diagToneGenerator() {
-        var tg: ToneGenerator? = null
-        try {
-            tg = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-            tg.startTone(ToneGenerator.TONE_DTMF_5, 600)
-            Thread.sleep(800)
-        } catch (t: Throwable) {
-            dbgErr("diagToneGenerator THREW", t)
-        } finally {
-            try { tg?.release() } catch (_: Throwable) {}
-        }
-    }
-
-    private fun safeHead(t: AudioTrack): Int = try { t.playbackHeadPosition } catch (e: Throwable) { -1 }
-    private fun safePlayState(t: AudioTrack): Int = try { t.playState } catch (e: Throwable) { -1 }
-
-    private fun resetUtteranceLocked() {
-        uttBytes = 0L
-        uttChunks = 0
-        uttPeak = 0
-        uttSumSq = 0.0
-        uttZeroSamples = 0L
-        uttSamples = 0L
-        uttWav.reset()
-    }
-
-    private fun openTrackLocked(rate: Int): Boolean {
-        if (rate <= 0) {
-            dbg("openTrack: ABORT sampleRate inválido=$rate")
-            return false
-        }
-        ensureMediaVolumeIsUp()
-
-        val minBuf = AudioTrack.getMinBufferSize(
-            rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
-        )
-        if (minBuf <= 0) {
-            dbg("openTrack: ABORT minBuf inválido=$minBuf")
-            return false
-        }
-        val bufSize = maxOf(minBuf * 4, 64 * 1024)
-
-        val t = try {
-            AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(rate)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
                 .setBufferSizeInBytes(bufSize)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
-        } catch (e: Throwable) {
-            dbgErr("openTrack: Builder THREW", e)
-            return false
-        }
 
-        if (t.state != AudioTrack.STATE_INITIALIZED) {
-            dbg("openTrack: ABORT el track no se inicializó")
-            try { t.release() } catch (_: Throwable) {}
-            return false
-        }
-
-        try { t.setVolume(1.0f) } catch (e: Throwable) { dbgErr("openTrack: setVolume THREW", e) }
-        requestAudioFocusLocked()
-        t.play()
-        dbg("openTrack: play() playState=${safePlayState(t)} routed=${describeDevice(t.routedDevice)}")
-
-        track = t
-        uttId++
-        resetUtteranceLocked()
-        return true
-    }
-
-    private fun onPcm(pcm: ByteArray) {
-        // Modo test: acumular en el buffer de la config actual
-        val tm = testMode
-        if (tm != null) {
-            synchronized(tm.buffer) { tm.buffer.write(pcm) }
-            return
-        }
-
-        if (shuttingDown) return
-        if (synthGeneration != generation.get()) return
-        val rate = sharedSynth?.sampleRate ?: 0
-
-        if (track == null) {
-            val prev = drainThread
-            if (prev != null && prev.isAlive) {
-                try { prev.join(15000) } catch (_: InterruptedException) {}
+            dbg("playCleanly: state=${t.state} (1=OK)")
+            if (t.state != AudioTrack.STATE_INITIALIZED) {
+                dbg("playCleanly: ABORT state inválido")
+                return
             }
-        }
 
-        val t: AudioTrack = synchronized(audioLock) {
-            if (track == null && !openTrackLocked(rate)) return
-            track
-        } ?: return
+            t.play()
+            val written = t.write(pcm, 0, pcm.size)
+            dbg("playCleanly: play() playState=${safePlayState(t)} write=$written/${pcm.size}")
 
-        var peak = 0
-        var sumSq = 0.0
-        var zeros = 0L
-        val n = pcm.size / 2
-        for (i in 0 until n) {
-            val s = (pcm[2 * i + 1].toInt() shl 8) or (pcm[2 * i].toInt() and 0xFF)
-            val a = abs(s)
-            if (a > peak) peak = a
-            if (s == 0) zeros++
-            sumSq += s.toDouble() * s.toDouble()
-        }
-
-        val written = try {
-            t.write(pcm, 0, pcm.size)
-        } catch (e: Throwable) {
-            -99
-        }
-
-        synchronized(audioLock) {
-            if (written > 0) {
-                uttBytes += written
-                uttWav.write(pcm, 0, written)
-            }
-            uttChunks++
-            if (peak > uttPeak) uttPeak = peak
-            uttSumSq += sumSq
-            uttZeroSamples += zeros
-            uttSamples += n
-        }
-    }
-
-    private fun onPcmComplete(fromCallback: Boolean) {
-        // Modo test: no hacer nada, el test suite gestiona la reproducción
-        if (testMode != null) return
-
-        if (shuttingDown) return
-
-        val job: DrainJob? = synchronized(audioLock) {
-            val t = track
-            if (t == null) {
-                null
-            } else {
-                val samples = uttSamples
-                val rms = if (samples > 0) sqrt(uttSumSq / samples).toInt() else 0
-                val zeroPct = if (samples > 0) (uttZeroSamples * 100 / samples).toInt() else 100
-                val j = DrainJob(
-                    uttId, t, uttBytes, uttChunks, uttPeak, rms, zeroPct,
-                    uttWav.toByteArray(), sharedSynth?.sampleRate ?: 22050
-                )
-                liveJobs.add(j)
-                track = null
-                j
-            }
-        }
-
-        if (job == null) return
-
-        val th = Thread({ drainWorker(job) }, "espeak-drain-${job.id}")
-        th.isDaemon = true
-        drainThread = th
-        th.start()
-    }
-
-    private fun drainWorker(job: DrainJob) {
-        val frames = (job.bytes / 2).toInt()
-        val expectedMs = if (job.rate > 0) frames * 1000L / job.rate else 0L
-        val t0 = SystemClock.elapsedRealtime()
-        val deadline = t0 + expectedMs + 3000L
-        var head = 0
-        var finished = false
-
-        while (!job.cancelled && SystemClock.elapsedRealtime() < deadline) {
-            head = safeHead(job.track)
-            if (head >= frames) {
-                finished = true
-                break
-            }
-            try { Thread.sleep(40) } catch (_: InterruptedException) { break }
-        }
-
-        if (job.cancelled) return
-
-        if (finished) {
-            dbg("drain#${job.id}: OK ($head/$frames)")
-        } else {
-            dbg("drain#${job.id}: TIMEOUT head=$head/$frames")
-        }
-
-        try { Thread.sleep(250) } catch (_: InterruptedException) {}
-
-        synchronized(audioLock) {
-            if (liveJobs.remove(job)) releaseTrack(job.track)
-            if (track == null && liveJobs.isEmpty()) abandonAudioFocusLocked()
-        }
-
-        if (DIAG_ENABLED && !job.cancelled) diagWavAndMediaPlayer(job)
-    }
-
-    private fun releaseTrack(t: AudioTrack) {
-        try { t.pause() } catch (_: Throwable) {}
-        try { t.flush() } catch (_: Throwable) {}
-        try { t.stop() } catch (_: Throwable) {}
-        try { t.release() } catch (_: Throwable) {}
-    }
-
-    private fun releaseEverything(reason: String) {
-        synchronized(audioLock) {
-            val t = track
-            track = null
-            if (t != null) releaseTrack(t)
-            liveJobs.forEach {
-                it.cancelled = true
-                releaseTrack(it.track)
-            }
-            liveJobs.clear()
-            resetUtteranceLocked()
-            abandonAudioFocusLocked()
-        }
-    }
-
-    private fun writeWav(file: File, pcm: ByteArray, sampleRate: Int) {
-        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-        header.put("RIFF".toByteArray(Charsets.US_ASCII))
-        header.putInt(36 + pcm.size)
-        header.put("WAVE".toByteArray(Charsets.US_ASCII))
-        header.put("fmt ".toByteArray(Charsets.US_ASCII))
-        header.putInt(16)
-        header.putShort(1.toShort())
-        header.putShort(1.toShort())
-        header.putInt(sampleRate)
-        header.putInt(sampleRate * 2)
-        header.putShort(2.toShort())
-        header.putShort(16.toShort())
-        header.put("data".toByteArray(Charsets.US_ASCII))
-        header.putInt(pcm.size)
-        file.outputStream().use {
-            it.write(header.array())
-            it.write(pcm)
-        }
-    }
-
-    private fun diagWavAndMediaPlayer(job: DrainJob) {
-        if (job.wav.isEmpty()) return
-        val dir = ctx.getExternalFilesDir(null) ?: ctx.filesDir
-        val f = File(dir, "espeak_last.wav")
-        try {
-            writeWav(f, job.wav, job.rate)
-        } catch (t: Throwable) {
-            dbgErr("DIAG WAV THREW", t)
-            return
-        }
-
-        val mp = MediaPlayer()
-        try {
-            mp.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            mp.setDataSource(f.absolutePath)
-            mp.prepare()
-            mp.start()
-            val dur = mp.duration
+            val frames = pcm.size / 2
+            val expectedMs = frames * 1000L / rate
             val t0 = SystemClock.elapsedRealtime()
-            while (mp.isPlaying && SystemClock.elapsedRealtime() - t0 < dur + 1500L) {
-                Thread.sleep(50)
+            val deadline = t0 + expectedMs + 3000L
+            var lastHead = 0
+            while (SystemClock.elapsedRealtime() < deadline) {
+                if (gen != generation.get()) {
+                    dbg("playCleanly: CANCELADO head=$lastHead/$frames (gen cambió)")
+                    break
+                }
+                lastHead = safeHead(t)
+                if (lastHead >= frames) {
+                    dbg("playCleanly: OK head=$lastHead/$frames en ${SystemClock.elapsedRealtime() - t0}ms")
+                    break
+                }
+                Thread.sleep(40)
             }
-        } catch (t: Throwable) {
-            dbgErr("DIAG MediaPlayer THREW", t)
+            if (lastHead < frames && gen == generation.get()) {
+                dbg("playCleanly: TIMEOUT head=$lastHead/$frames")
+            }
+
+            // Margen para que el HAL termine
+            Thread.sleep(150)
+        } catch (ex: Throwable) {
+            dbgErr("playCleanly THREW", ex)
         } finally {
-            try { mp.release() } catch (_: Throwable) {}
+            try { t?.pause() } catch (_: Throwable) {}
+            try { t?.flush() } catch (_: Throwable) {}
+            try { t?.stop() } catch (_: Throwable) {}
+            try { t?.release() } catch (_: Throwable) {}
+            abandonAudioFocusLocked()
         }
     }
 
     override fun speak(text: String, interruptible: Boolean) {
         if (!initialized) {
             pendingText = text
+            dbg("speak: motor no listo, texto en cola")
             return
         }
-        val s = sharedSynth ?: return
-        lastSpeakAt = SystemClock.elapsedRealtime()
+        val s = sharedSynth
+        if (s == null) {
+            dbg("speak: sharedSynth es null")
+            return
+        }
+
+        dbg("speak(\"$text\", interruptible=$interruptible)")
 
         val gen: Int
         if (interruptible) {
             gen = generation.incrementAndGet()
-            try { s.stop() } catch (_: Throwable) {}
-            releaseEverything("speak(interruptible)")
+            try { s.stop() } catch (t: Throwable) { dbgErr("speak: synth.stop THREW", t) }
+            abandonAudioFocusLocked()
         } else {
             gen = generation.get()
         }
 
         synthExecutor.execute {
-            if (shuttingDown) return@execute
-            if (generation.get() != gen) return@execute
+            if (shuttingDown) {
+                dbg("synth: motor cerrado, omito")
+                return@execute
+            }
+            if (generation.get() != gen) {
+                dbg("synth: locución obsoleta (gen=$gen != ${generation.get()})")
+                return@execute
+            }
             try {
                 synthGeneration = gen
+                val pcmOut = ByteArrayOutputStream()
+                pcmBuffer = pcmOut
+
+                val t0 = SystemClock.elapsedRealtime()
+                dbg("synth: synthesize START \"$text\" gen=$gen")
                 s.synthesize(text, false)
-                onPcmComplete(false)
+                dbg("synth: synthesize RETURNED tras ${SystemClock.elapsedRealtime() - t0}ms")
+
+                pcmBuffer = null
+                val pcmBytes = pcmOut.toByteArray()
+
+                if (pcmBytes.isEmpty()) {
+                    dbg("synth: PCM vacío, no reproduzco")
+                    return@execute
+                }
+                if (generation.get() != gen) {
+                    dbg("synth: gen cambió antes de playCleanly, abandonando")
+                    return@execute
+                }
+
+                // AHORA sí: fuera de synthesize(), reproducimos.
+                playCleanly(pcmBytes, gen)
             } catch (t: Throwable) {
+                dbgErr("synth: THREW", t)
                 VocaliaLogger.e(TAG, "Error synthesize: ${t.message}", t as? Exception)
+            } finally {
+                pcmBuffer = null
             }
         }
     }
 
     override fun stop() {
+        dbg("stop()")
         generation.incrementAndGet()
-        try { sharedSynth?.stop() } catch (_: Throwable) {}
-        releaseEverything("stop()")
+        try { sharedSynth?.stop() } catch (t: Throwable) { dbgErr("stop: synth.stop THREW", t) }
+        abandonAudioFocusLocked()
     }
 
     override fun setSpeed(rate: Float) {
         try {
             val wpm = (175 * rate).toInt().coerceIn(80, 450)
             sharedSynth?.Rate?.setValue(wpm)
-        } catch (_: Throwable) {}
+            dbg("setSpeed($rate) -> $wpm wpm")
+        } catch (t: Throwable) {
+            VocaliaLogger.w(TAG, "Error setSpeed: ${t.message}")
+            dbgErr("setSpeed THREW", t)
+        }
     }
 
     override fun shutdown() {
+        dbg("shutdown()")
         shuttingDown = true
         stop()
         if (activeEngine === this) activeEngine = null
