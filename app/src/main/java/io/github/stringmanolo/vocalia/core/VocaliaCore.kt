@@ -36,8 +36,6 @@ class VocaliaCore(
         ttsManager.stop()
     }
 
-    // --- Estados ---
-
     private fun enterIdle() {
         if (state == State.IDLE) return
         log("enterIdle")
@@ -62,8 +60,6 @@ class VocaliaCore(
             }
         }.also { mainHandler.postDelayed(it, 5_000L) }
     }
-
-    // --- Eventos de Vosk ---
 
     private fun handleResult(json: String) {
         val text = extractText(json)
@@ -109,12 +105,21 @@ class VocaliaCore(
         }.also { mainHandler.postDelayed(it, 30_000L) }
 
         when (val result = commandParser.parse(text)) {
-            CommandResult.Sleep -> ttsManager.speak("descanso") { enterIdle() }
-            is CommandResult.Response -> ttsManager.speak(result.text) { enterIdle() }
+            CommandResult.Sleep -> {
+                ttsManager.speak("descanso") { enterIdle() }
+            }
+            is CommandResult.Response -> {
+                ttsManager.speak(result.text) { enterIdle() }
+            }
+            is CommandResult.SetVoiceMode -> {
+                val mode = if (result.intelligent) TtsManager.EngineMode.SHERPA
+                           else TtsManager.EngineMode.ESPEAK
+                val (ok, message) = ttsManager.setEngine(mode)
+                log("setEngine($mode): ok=$ok, message=\"$message\"")
+                ttsManager.speak(message) { enterIdle() }
+            }
         }
     }
-
-    // --- Utilidades ---
 
     private fun extractWake(text: String): Pair<Boolean, String> {
         val words = text.split(" ").filter { it.isNotBlank() }

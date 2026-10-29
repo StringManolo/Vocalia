@@ -16,13 +16,15 @@ class VoskEngine(private val context: Context) {
     companion object {
         private const val TAG = "VoskEngine"
         private const val GRAMMAR = """[
-            "asistente", "asistentes",
-            "que hora es", "que hora", "la hora", "hora es", "qué hora es", "qué hora",
-            "que dia es", "que dia", "que fecha", "fecha", "qué día es", "qué día", "qué fecha",
-            "descansa", "descanso", "descansar", "cansa", "duerme", "para", "parar", "silencio", "callate",
-            "hola", "que tal", "qué tal", "como estas", "cómo estás",
-            "[unk]"
-        ]"""
+    "asistente", "asistentes",
+    "que hora es", "que hora", "la hora", "hora es", "qué hora es", "qué hora",
+    "que dia es", "que dia", "que fecha", "fecha", "qué día es", "qué día", "qué fecha",
+    "descansa", "descanso", "descansar", "cansa", "duerme", "para", "parar", "silencio", "callate",
+    "hola", "que tal", "qué tal", "como estas", "cómo estás",
+    "usa voz inteligente", "voz inteligente", "usa voz piper", "voz piper", "voz neuronal",
+    "usa voz por defecto", "voz por defecto", "usa voz normal", "voz normal", "usa espeak",
+    "[unk]"
+]"""
     }
 
     private var model: Model? = null

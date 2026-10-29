@@ -7,41 +7,106 @@ class TtsManager(private val context: Context) {
 
     companion object {
         private const val TAG = "TtsManager"
-        const val ENABLE_SHERPA = false
     }
+
+    enum class EngineMode { ESPEAK, SHERPA }
 
     var onEngineReady: ((TtsEngine) -> Unit)? = null
 
+    @Volatile private var currentMode: EngineMode = EngineMode.ESPEAK
     @Volatile private var currentEngine: TtsEngine? = null
-    private var sherpaEngine: TtsEngine? = null
-    private var espeakEngine: TtsEngine? = null
 
-    private data class Pending(val text: String, val onComplete: (() -> Unit)?)
-    private val pendingUtterances = mutableListOf<Pending>()
+    private var espeakEngine: EspeakNgEngine? = null
+    private var sherpaEngine: SherpaOnnxEngine? = null
+
+    @Volatile private var sherpaReady = false
+    @Volatile private var sherpaInitAttempted = false
 
     fun init() {
-        val engine = EspeakNgEngine(context)
-        espeakEngine = engine
-        engine.init(
+        val espeak = EspeakNgEngine(context)
+        espeakEngine = espeak
+        espeak.init(
             onReady = {
-                currentEngine = engine
-                flushPending()
-                onEngineReady?.invoke(engine)
+                Log.i(TAG, "EspeakNg listo (default)")
+                currentEngine = espeak
+                currentMode = EngineMode.ESPEAK
+                onEngineReady?.invoke(espeak)
+                tryInitSherpaInBackground()
             },
             onError = { error ->
-                Log.e(TAG, "EspeakNg falló: $error")
+                Log.e(TAG, "EspeakNg falló al inicializar: $error")
             }
         )
     }
 
-    /** Sin callback: para usos que no necesitan saber cuándo termina. */
-    fun speak(text: String) = speak(text, null)
+    /** Intenta cargar Sherpa en segundo plano. No bloquea el arranque ni lo activa. */
+    private fun tryInitSherpaInBackground() {
+        if (sherpaInitAttempted) return
+        sherpaInitAttempted = true
+        Thread({
+            try {
+                Log.i(TAG, "Sherpa: init en segundo plano")
+                val sherpa = SherpaOnnxEngine(context)
+                sherpaEngine = sherpa
+                sherpa.init(
+                    onReady = {
+                        sherpaReady = true
+                        Log.i(TAG, "Sherpa: listo (no activado)")
+                    },
+                    onError = { err ->
+                        Log.e(TAG, "Sherpa: no disponible -> $err")
+                        sherpaEngine = null
+                        sherpaReady = false
+                    }
+                )
+            } catch (t: Throwable) {
+                Log.e(TAG, "Sherpa: init THREW", t)
+                sherpaEngine = null
+                sherpaReady = false
+            }
+        }, "sherpa-init").start()
+    }
 
-    /** Con callback: se invoca cuando la locución termina o se cancela. */
-    fun speak(text: String, onComplete: (() -> Unit)?) {
+    /**
+     * Cambia el motor activo.
+     * @return (éxito, mensaje para el usuario).
+     */
+    fun setEngine(mode: EngineMode): Pair<Boolean, String> {
+        return when (mode) {
+            EngineMode.ESPEAK -> {
+                val e = espeakEngine
+                if (e != null) {
+                    currentEngine = e
+                    currentMode = EngineMode.ESPEAK
+                    Log.i(TAG, "Motor cambiado a EspeakNg")
+                    true to "voz por defecto activada"
+                } else {
+                    Log.e(TAG, "setEngine(ESPEAK) sin motor")
+                    false to "espeak no disponible"
+                }
+            }
+            EngineMode.SHERPA -> {
+                val s = sherpaEngine
+                if (sherpaReady && s != null) {
+                    currentEngine = s
+                    currentMode = EngineMode.SHERPA
+                    Log.i(TAG, "Motor cambiado a SherpaOnnx")
+                    true to "voz inteligente activada"
+                } else {
+                    Log.w(TAG, "setEngine(SHERPA) no listo")
+                    false to "voz inteligente no disponible"
+                }
+            }
+        }
+    }
+
+    fun currentMode(): EngineMode = currentMode
+
+    fun speak(text: String, onComplete: (() -> Unit)? = null) {
         val engine = currentEngine
         if (engine == null) {
-            pendingUtterances.add(Pending(text, onComplete))
+            Log.w(TAG, "speak sin motor")
+            onComplete?.invoke()
             return
         }
         engine.onComplete = onComplete
@@ -54,22 +119,12 @@ class TtsManager(private val context: Context) {
     }
 
     fun shutdown() {
-        currentEngine?.onComplete = null
+        Log.i(TAG, "shutdown")
         try { espeakEngine?.shutdown() } catch (_: Throwable) {}
         try { sherpaEngine?.shutdown() } catch (_: Throwable) {}
         currentEngine = null
-        sherpaEngine = null
         espeakEngine = null
-        pendingUtterances.clear()
-    }
-
-    private fun flushPending() {
-        if (pendingUtterances.isEmpty()) return
-        val queue = pendingUtterances.toList()
-        pendingUtterances.clear()
-        queue.forEach { (text, cb) ->
-            currentEngine?.onComplete = cb
-            currentEngine?.speak(text)
-        }
+        sherpaEngine = null
+        sherpaReady = false
     }
 }

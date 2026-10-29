@@ -7,6 +7,8 @@ import java.util.Locale
 sealed class CommandResult {
     object Sleep : CommandResult()
     data class Response(val text: String) : CommandResult()
+    /** true = voz inteligente (Sherpa), false = voz por defecto (espeak). */
+    data class SetVoiceMode(val intelligent: Boolean) : CommandResult()
 }
 
 class CommandParser {
@@ -17,22 +19,25 @@ class CommandParser {
         val text = raw.lowercase(esLocale).trim()
         return when {
             text.isBlank() -> CommandResult.Response("no te he entendido")
+
+            // Cambio de motor (antes de "hora" para evitar ambigüedades)
+            matches(text, "inteligente", "piper", "neuronal", "natural") ->
+                CommandResult.SetVoiceMode(intelligent = true)
+            matches(text, "por defecto", "normal", "espeak", "robotica", "robótica", "robotizada") ->
+                CommandResult.SetVoiceMode(intelligent = false)
+
             matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "para", "parar", "silencio", "callate") ->
                 CommandResult.Sleep
+
             matches(text, "hora") -> CommandResult.Response(currentTime())
             matches(text, "fecha", "dia", "día") -> CommandResult.Response(currentDate())
             matches(text, "hola") -> CommandResult.Response("hola")
             matches(text, "estas", "estás", "tal") -> CommandResult.Response("bien, gracias")
+
             else -> CommandResult.Response("no entiendo")
         }
     }
 
-    /**
-     * Match flexible:
-     *  - contiene la palabra clave ("descanso" contiene "descans"? no, pero "descansar" sí)
-     *  - la palabra clave contiene al texto ("cansa" está en "descansa")
-     *  - comparten un prefijo de al menos 4 caracteres ("descans" de "descanso"/"descansa")
-     */
     private fun matches(text: String, vararg keywords: String): Boolean =
         keywords.any { kw ->
             text.contains(kw) || kw.contains(text) || commonPrefix(text, kw) >= 4
