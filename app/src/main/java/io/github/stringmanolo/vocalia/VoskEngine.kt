@@ -15,49 +15,20 @@ class VoskEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "VoskEngine"
-       private const val GRAMMAR = """[
-    "asistente", "asistentes",
-    "que hora es", "que hora", "la hora", "hora es", "qué hora es", "qué hora",
-    "que dia es", "que dia", "que fecha", "fecha", "qué día es", "qué día", "qué fecha",
-    "descansa", "descanso", "descansar", "cansa", "duerme", "para", "parar", "silencio", "callate",
-    "hola", "que tal", "qué tal", "como estas", "cómo estás",
-    "usa voz inteligente", "voz inteligente", "usa voz por defecto", "voz por defecto",
-    "abre telegram", "abrir telegram", "lanza telegram",
-    "abre whatsapp", "abrir whatsapp", "lanza whatsapp",
-    "abre signal", "abrir signal",
-    "abre chrome", "abrir chrome", "abre el navegador", "abrir el navegador", "abre navegador",
-    "abre firefox", "abre brave",
-    "abre youtube", "abrir youtube", "abre newpipe",
-    "abre spotify", "abrir spotify", "abre musica", "abre la musica",
-    "abre la camara", "abre camara", "abre la cámara", "abre cámara",
-    "abre la galeria", "abre galeria", "abre la galería", "abre galería", "abre fotos",
-    "abre ajustes", "abrir ajustes", "abre configuracion", "abre configuración",
-    "abre contactos", "abrir contactos",
-    "abre el telefono", "abre telefono", "abre el teléfono", "abre teléfono", "abre marcador",
-    "abre calculadora", "abre la calculadora", "abrir calculadora",
-    "abre el reloj", "abre reloj", "abre alarma", "abre la alarma",
-    "abre calendario", "abre el calendario", "abre notas", "abre las notas",
-    "abre maps", "abre mapas", "abre google maps",
-    "abre gmail", "abre el correo", "abre correo",
-    "abre aurora", "abre fdroid", "abre appgallery", "abre app gallery",
-    "[unk]"
-]"""
+        private const val DEFAULT_GRAMMAR = """["asistente", "asistentes", "[unk]"]"""
     }
 
     private var model: Model? = null
     private var speechService: SpeechService? = null
+    @Volatile private var currentGrammar: String = DEFAULT_GRAMMAR
 
     var onResult: ((String) -> Unit)? = null
     var onPartialResult: ((String) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
     private val listener = object : RecognitionListener {
-        override fun onPartialResult(hypothesis: String?) {
-            onPartialResult?.invoke(hypothesis ?: "")
-        }
-        override fun onResult(hypothesis: String?) {
-            onResult?.invoke(hypothesis ?: "")
-        }
+        override fun onPartialResult(hypothesis: String?) { onPartialResult?.invoke(hypothesis ?: "") }
+        override fun onResult(hypothesis: String?) { onResult?.invoke(hypothesis ?: "") }
         override fun onFinalResult(hypothesis: String?) {}
         override fun onError(exception: Exception?) {
             Log.e(TAG, "Error reconocimiento", exception)
@@ -66,14 +37,15 @@ class VoskEngine(private val context: Context) {
         override fun onTimeout() {}
     }
 
-    fun init(onReady: () -> Unit) {
+    fun init(grammar: String, onReady: () -> Unit) {
+        currentGrammar = grammar
         StorageService.unpack(
             context,
             "vosk-model-small-es-0.42",
             "model",
             { loadedModel ->
                 model = loadedModel
-                Log.i(TAG, "Modelo cargado")
+                Log.i(TAG, "Modelo cargado, grammar de ${grammar.length} chars")
                 onReady()
             },
             { exception ->
@@ -83,7 +55,6 @@ class VoskEngine(private val context: Context) {
         )
     }
 
-    /** Arranca el reconocimiento con la gramática completa. Idempotente. */
     fun startListening() {
         if (speechService != null) return
         val m = model ?: run {
@@ -91,7 +62,7 @@ class VoskEngine(private val context: Context) {
             return
         }
         try {
-            val recognizer = Recognizer(m, 16000.0f, GRAMMAR)
+            val recognizer = Recognizer(m, 16000.0f, currentGrammar)
             speechService = SpeechService(recognizer, 16000.0f)
             speechService?.startListening(listener)
             Log.i(TAG, "startListening OK")
@@ -112,7 +83,6 @@ class VoskEngine(private val context: Context) {
         model = null
     }
 
-    /** Pitido corto (100 ms) para feedback. No bloquea. */
     fun beep() {
         Thread {
             var tg: ToneGenerator? = null
@@ -120,8 +90,7 @@ class VoskEngine(private val context: Context) {
                 tg = ToneGenerator(AudioManager.STREAM_MUSIC, 60)
                 tg.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
                 Thread.sleep(150)
-            } catch (_: Throwable) {
-            } finally {
+            } catch (_: Throwable) {} finally {
                 try { tg?.release() } catch (_: Throwable) {}
             }
         }.start()

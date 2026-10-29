@@ -16,4 +16,10 @@ Cosas concretas que añadir/parchear/evaluar.
 
 - Añadir confirmación robusta (con pin opcional) para tareas sensitivas. (Modo Root, similar a como funciona SUDO y SUDO SU en Linux)
 
+- Abuse cache in worflow to reduce build times
 
+- Test if worth to embeed unzip on the apk to reduce apk size and decompress on runtime
+
+- Design icons, etc
+
+- Fastlanes generated from github actions to push for fdroid

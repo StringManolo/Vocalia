@@ -9,11 +9,11 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import io.github.stringmanolo.vocalia.core.AppLauncher
 import io.github.stringmanolo.vocalia.core.CommandParser
 import io.github.stringmanolo.vocalia.core.VocaliaCore
 import io.github.stringmanolo.vocalia.tts.TtsManager
 import io.github.stringmanolo.vocalia.util.InternalDebug
-import io.github.stringmanolo.vocalia.core.AppLauncher
 
 class VocaliaService : Service() {
 
@@ -21,35 +21,64 @@ class VocaliaService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "vocalia_main_channel"
 
-        @Volatile
-        var isRunning: Boolean = false
+        @Volatile var isRunning: Boolean = false
             private set
     }
 
     private lateinit var ttsManager: TtsManager
     private lateinit var voskEngine: VoskEngine
     private lateinit var core: VocaliaCore
+    private lateinit var appLauncher: AppLauncher
 
     override fun onCreate() {
-    super.onCreate()
-    InternalDebug.mark("Service: onCreate")
+        super.onCreate()
+        InternalDebug.mark("Service: onCreate")
 
-    ttsManager = TtsManager(this)
-    voskEngine = VoskEngine(this)
-    core = VocaliaCore(
-        voskEngine = voskEngine,
-        ttsManager = ttsManager,
-        commandParser = CommandParser(),
-        appLauncher = AppLauncher(this),
-        log = { msg -> InternalDebug.mark("[core] $msg") }
-    )
+        appLauncher = AppLauncher(this)
+        appLauncher.preload()
 
-    ttsManager.onEngineReady = {
-        InternalDebug.mark("Service: TTS listo, arrancando core")
-        core.start()
+        val appNames = appLauncher.getAllInstalledAppNames()
+        InternalDebug.mark("Service: ${appNames.size} apps instaladas")
+        val grammar = buildGrammar(appNames)
+        InternalDebug.mark("Service: grammar de ${grammar.length} chars")
+
+        ttsManager = TtsManager(this)
+        voskEngine = VoskEngine(this)
+        core = VocaliaCore(
+            voskEngine = voskEngine,
+            ttsManager = ttsManager,
+            commandParser = CommandParser(appLauncher),
+            appLauncher = appLauncher,
+            log = { msg -> InternalDebug.mark("[core] $msg") }
+        )
+
+        ttsManager.onEngineReady = {
+            InternalDebug.mark("Service: TTS listo, arrancando core")
+            core.start(grammar)
+        }
+        ttsManager.init()
     }
-    ttsManager.init()
-}
+
+    private fun buildGrammar(appNames: List<String>): String {
+        val commands = mutableListOf(
+            "asistente", "asistentes",
+            "que hora es", "que hora", "la hora", "hora es", "qué hora es", "qué hora",
+            "que dia es", "que dia", "que fecha", "fecha", "qué día es", "qué día", "qué fecha",
+            "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "para", "parar", "silencio", "callate",
+            "hola", "que tal", "qué tal", "como estas", "cómo estás",
+            "usa voz inteligente", "voz inteligente", "usa voz por defecto", "voz por defecto"
+        )
+        val prefixes = listOf("abre", "abrir", "lanza", "arranca", "abreme", "arrancame")
+        for (app in appNames) {
+            val safe = app.replace("\"", "").replace("\\", "").trim()
+            if (safe.isBlank()) continue
+            for (prefix in prefixes) {
+                commands.add("$prefix $safe")
+            }
+        }
+        commands.add("[unk]")
+        return commands.joinToString(",", "[", "]") { "\"$it\"" }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()

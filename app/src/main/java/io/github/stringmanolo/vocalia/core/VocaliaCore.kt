@@ -20,9 +20,9 @@ class VocaliaCore(
     private var timeoutRunnable: Runnable? = null
     private var safetyRunnable: Runnable? = null
 
-    fun start() {
+    fun start(grammar: String) {
         log("start")
-        voskEngine.init {
+        voskEngine.init(grammar) {
             voskEngine.onResult = { json -> handleResult(json) }
             voskEngine.onPartialResult = { }
             voskEngine.startListening()
@@ -73,6 +73,19 @@ class VocaliaCore(
                 if (hasWake) {
                     enterListening()
                     if (remainder.isNotBlank()) handleCommand(remainder)
+                } else {
+                    // Gracia: aceptar comandos "fuertes" sin wake word
+                    val parsed = commandParser.parse(text)
+                    val isStrong = when (parsed) {
+                        is CommandResult.OpenApp -> appLauncher.hasApp(parsed.appName)
+                        is CommandResult.SetVoiceMode -> true
+                        else -> false
+                    }
+                    if (isStrong) {
+                        log("IDLE gracia: aceptando \"$text\" sin wake word")
+                        enterListening()
+                        handleCommand(text)
+                    }
                 }
             }
             State.LISTENING -> {
@@ -104,12 +117,8 @@ class VocaliaCore(
         }.also { mainHandler.postDelayed(it, 60_000L) }
 
         when (val result = commandParser.parse(text)) {
-            CommandResult.Sleep -> {
-                ttsManager.speak("descanso") { enterIdle() }
-            }
-            is CommandResult.Response -> {
-                ttsManager.speak(result.text) { enterIdle() }
-            }
+            CommandResult.Sleep -> ttsManager.speak("descanso") { enterIdle() }
+            is CommandResult.Response -> ttsManager.speak(result.text) { enterIdle() }
             is CommandResult.SetVoiceMode -> {
                 if (result.intelligent) {
                     ttsManager.speak("cargando voz inteligente") {
