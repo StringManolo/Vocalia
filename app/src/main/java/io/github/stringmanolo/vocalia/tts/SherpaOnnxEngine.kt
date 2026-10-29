@@ -50,10 +50,8 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
                 )
             )
             val instance = OfflineTts(context.assets, config)
-            
-instance.allocate(context.assets)   // ← NUEVA LÍNEA
-tts = instance
-dbg("init: OfflineTts creado y allocate() llamado")
+            tts = instance
+            dbg("init: OfflineTts creado")
 
             Thread({
                 try {

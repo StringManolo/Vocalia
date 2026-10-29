@@ -52,7 +52,7 @@ dependencies {
   implementation "net.java.dev.jna:jna:5.13.0@aar"
   implementation "com.alphacephei:vosk-android:0.3.47"
 
-  implementation(files("libs/sherpa-onnx-2.0.1.aar"))
+  implementation(files("libs/sherpa-onnx-1.13.4.aar"))
 
   implementation 'androidx.appcompat:appcompat:1.6.1'
   implementation 'com.google.android.material:material:1.11.0'
