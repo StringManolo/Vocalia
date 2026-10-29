@@ -62,7 +62,7 @@ class TtsManager(private val context: Context) {
 
             // init es asíncrono en SherpaOnnxEngine; esperamos con latch
             val latch = java.util.concurrent.CountDownLatch(1)
-            @Volatile var ok = false
+            val ok = java.util.concurrent.atomic.AtomicBoolean(false)
             sherpa.init(
                 onReady = {
                     ok = true

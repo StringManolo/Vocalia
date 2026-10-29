@@ -46,6 +46,11 @@ android {
     jvmTarget = '1.8'
   }                                                                                   }
 
+  packagingOptions {
+        // Excluye la copia de onnxruntime que pueda venir de otras dependencias
+        exclude 'lib/*/libonnxruntime.so'
+    }
+
 dependencies {
   implementation 'androidx.core:core-ktx:1.13.1'
 
