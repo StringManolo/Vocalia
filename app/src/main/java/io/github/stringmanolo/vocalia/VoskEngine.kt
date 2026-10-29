@@ -13,7 +13,8 @@ class VoskEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "VoskEngine"
-        private const val WAKE_GRAMMAR = """["vocalia", "[unk]"]"""
+        //private const val WAKE_GRAMMAR = """["vocalia", "[unk]"]"""
+        private const val WAKE_GRAMMAR = """["asistente", "asistentes", "[unk]"]"""
     }
 
     enum class Mode { WAKE, COMMAND }

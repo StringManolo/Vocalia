@@ -20,7 +20,7 @@ class VocaliaCore(
          * lo que oye Vosk. Sirve para descubrir cómo transcribe el modelo la wake
          * word real. Poner a false una vez elegida la wake word definitiva.
          */
-        private const val DIAG_IDLE_FREE = true
+        private const val DIAG_IDLE_FREE = false
     }
 
     private var state = State.IDLE
@@ -122,7 +122,7 @@ class VocaliaCore(
         val text = extractText(json)
         if (text.isBlank()) return false to ""
         val words = text.split(" ").filter { it.isNotBlank() }
-        val wakeIdx = words.indexOfFirst { it == "vocalia" || it == "vocalía" }
+        val wakeIdx = words.indexOfFirst { it == "asistente" || it == "asistentes" }
         if (wakeIdx < 0) return false to ""
         val remainder = if (wakeIdx == words.lastIndex) "" else words.drop(wakeIdx + 1).joinToString(" ")
         return true to remainder
