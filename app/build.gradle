@@ -49,18 +49,17 @@ android {
 
   packaging {
     jniLibs {
-      excludes += "lib/*/libonnxruntime.so"
+      pickFirsts += "**/libonnxruntime.so"
     }
   }
 }
 
 dependencies {
+  implementation(files("libs/sherpa-onnx-1.13.4.aar"))
   implementation 'androidx.core:core-ktx:1.13.1'
 
   implementation "net.java.dev.jna:jna:5.13.0@aar"
-  implementation "com.alphacephei:vosk-android:0.3.47"
 
-  implementation(files("libs/sherpa-onnx-1.13.4.aar"))
 
   implementation 'androidx.appcompat:appcompat:1.6.1'
   implementation 'com.google.android.material:material:1.11.0'
@@ -69,4 +68,5 @@ dependencies {
   testImplementation 'junit:junit:4.13.2'
   androidTestImplementation 'androidx.test.ext:junit:1.1.5'
   androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+  implementation "com.alphacephei:vosk-android:0.3.47"
 }
