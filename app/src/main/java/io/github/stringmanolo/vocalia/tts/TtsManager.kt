@@ -2,6 +2,9 @@ package io.github.stringmanolo.vocalia.tts
 
 import android.content.Context
 import io.github.stringmanolo.vocalia.util.InternalDebug
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class TtsManager(private val context: Context) {
 
@@ -31,7 +34,7 @@ class TtsManager(private val context: Context) {
                 currentEngine = espeak
                 currentMode = EngineMode.ESPEAK
                 onEngineReady?.invoke(espeak)
-                // Sherpa NO se carga aquí. Se carga cuando se pide.
+                // Sherpa NO se carga aquí. Se carga la primera vez que se pide.
             },
             onError = { error ->
                 dbg("EspeakNg falló al inicializar: $error")
@@ -40,13 +43,13 @@ class TtsManager(private val context: Context) {
     }
 
     /**
-     * Carga Sherpa bajo demanda (si no está cargado).
-     * Bloquea hasta 15 s. Devuelve true si está listo.
+     * Carga Sherpa bajo demanda si no está cargado.
+     * @return true si está listo para usarse.
      */
     private fun ensureSherpaLoaded(): Boolean {
         if (sherpaReady) return true
         if (sherpaLoading) {
-            // Otra llamada ya está cargando; esperar hasta 15 s
+            // Otra llamada ya está cargando. Esperar hasta 15 s.
             val t0 = System.currentTimeMillis()
             while (sherpaLoading && System.currentTimeMillis() - t0 < 15_000L) {
                 Thread.sleep(100)
@@ -60,12 +63,12 @@ class TtsManager(private val context: Context) {
             val sherpa = SherpaOnnxEngine(context)
             sherpaEngine = sherpa
 
-            // init es asíncrono en SherpaOnnxEngine; esperamos con latch
-            val latch = java.util.concurrent.CountDownLatch(1)
-            val ok = java.util.concurrent.atomic.AtomicBoolean(false)
+            val latch = CountDownLatch(1)
+            val ok = AtomicBoolean(false)
+
             sherpa.init(
                 onReady = {
-                    ok = true
+                    ok.set(true)
                     sherpaReady = true
                     latch.countDown()
                 },
@@ -76,11 +79,12 @@ class TtsManager(private val context: Context) {
                     latch.countDown()
                 }
             )
-            val done = latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+
+            val done = latch.await(15, TimeUnit.SECONDS)
             if (!done) {
-                dbg("Sherpa: timeout esperando init")
+                dbg("Sherpa: timeout esperando init (>15s)")
             }
-            return ok
+            return ok.get()
         } catch (t: Throwable) {
             dbg("Sherpa: ensureSherpaLoaded THREW ${t.javaClass.simpleName}: ${t.message}")
             sherpaEngine = null
@@ -101,11 +105,11 @@ class TtsManager(private val context: Context) {
                     dbg("Motor cambiado a EspeakNg")
                     true to "voz por defecto activada"
                 } else {
+                    dbg("setEngine(ESPEAK) sin motor")
                     false to "espeak no disponible"
                 }
             }
             EngineMode.SHERPA -> {
-                // Cargar bajo demanda en un hilo, con timeout
                 if (!ensureSherpaLoaded()) {
                     dbg("setEngine(SHERPA): no se pudo cargar")
                     return false to "voz inteligente no disponible"
@@ -126,6 +130,7 @@ class TtsManager(private val context: Context) {
     fun speak(text: String, onComplete: (() -> Unit)? = null) {
         val engine = currentEngine
         if (engine == null) {
+            dbg("speak sin motor")
             onComplete?.invoke()
             return
         }
