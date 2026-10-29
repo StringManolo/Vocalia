@@ -10,6 +10,7 @@ class VocaliaCore(
     private val voskEngine: VoskEngine,
     private val ttsManager: TtsManager,
     private val commandParser: CommandParser,
+    private val appLauncher: AppLauncher,
     private val log: (String) -> Unit
 ) {
     private enum class State { IDLE, LISTENING, EXECUTING }
@@ -23,7 +24,7 @@ class VocaliaCore(
         log("start")
         voskEngine.init {
             voskEngine.onResult = { json -> handleResult(json) }
-            voskEngine.onPartialResult = { /* ignorar */ }
+            voskEngine.onPartialResult = { }
             voskEngine.startListening()
             log("Vosk escuchando")
         }
@@ -86,9 +87,7 @@ class VocaliaCore(
                     handleCommand(text)
                 }
             }
-            State.EXECUTING -> {
-                log("ignorando result (EXECUTING)")
-            }
+            State.EXECUTING -> log("ignorando result (EXECUTING)")
         }
     }
 
@@ -113,29 +112,33 @@ class VocaliaCore(
             }
             is CommandResult.SetVoiceMode -> {
                 if (result.intelligent) {
-                    // Carga asíncrona: decir "cargando" con espeak y luego cambiar
                     ttsManager.speak("cargando voz inteligente") {
                         if (state != State.EXECUTING) return@speak
                         ttsManager.setEngineAsync(TtsManager.EngineMode.SHERPA) { ok, msg ->
                             mainHandler.post {
                                 log("setEngineAsync(SHERPA): ok=$ok, msg=$msg")
-                                if (state == State.EXECUTING) {
-                                    ttsManager.speak(msg) { enterIdle() }
-                                }
+                                if (state == State.EXECUTING) ttsManager.speak(msg) { enterIdle() }
                             }
                         }
                     }
                 } else {
-                    // Espeak: cambio instantáneo
                     ttsManager.setEngineAsync(TtsManager.EngineMode.ESPEAK) { ok, msg ->
                         mainHandler.post {
                             log("setEngineAsync(ESPEAK): ok=$ok, msg=$msg")
-                            if (state == State.EXECUTING) {
-                                ttsManager.speak(msg) { enterIdle() }
-                            }
+                            if (state == State.EXECUTING) ttsManager.speak(msg) { enterIdle() }
                         }
                     }
                 }
+            }
+            is CommandResult.OpenApp -> {
+                val r = appLauncher.launch(result.appName)
+                val message = when (r) {
+                    is AppLauncher.Result.Ok -> "abriendo ${result.appName}"
+                    is AppLauncher.Result.NotFound -> "no encuentro la app ${result.appName}"
+                    is AppLauncher.Result.Error -> "no pude abrir ${result.appName}"
+                }
+                log("OpenApp(\"${result.appName}\") -> $message")
+                ttsManager.speak(message) { enterIdle() }
             }
         }
     }

@@ -1,16 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="io.github.stringmanolo.vocalia">
 
-    <!-- Permisos mínimos para Fase 0 -->
+    <!-- Permisos base -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- Se usará en Fase 1; lo dejamos declarado ya -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!--
+        QUERY_ALL_PACKAGES: necesario para ver todas las apps instaladas en Android 11+.
+        Sin esto, queryIntentActivities devuelve solo las apps "visibles" para la app.
+        Como asistente de accesibilidad, es un caso de uso legítimo.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- Queries para apps con launcher -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
 
     <application
         android:name=".VocaliaApp"
@@ -19,8 +35,9 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Vocalia">
+        android:theme="@style/Theme.HelloWorld">
 
+        <!-- Activity principal -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -30,20 +47,22 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".LogActivity" android:exported="false" />
+        <!-- Visor de logs -->
+        <activity
+            android:name=".LogActivity"
+            android:exported="false" />
 
         <!-- Servicio principal en primer plano -->
         <service
             android:name=".VocaliaService"
             android:exported="false"
-            android:process=":vocalia"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="voice_assistant_service" />
         </service>
 
-        <!-- Servicio de accesibilidad (stub en Fase 0) -->
+        <!-- Servicio de accesibilidad (stub, Fase 2) -->
         <service
             android:name=".VocaliaAccessibilityService"
             android:exported="true"

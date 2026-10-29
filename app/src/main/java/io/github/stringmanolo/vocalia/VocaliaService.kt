@@ -13,6 +13,7 @@ import io.github.stringmanolo.vocalia.core.CommandParser
 import io.github.stringmanolo.vocalia.core.VocaliaCore
 import io.github.stringmanolo.vocalia.tts.TtsManager
 import io.github.stringmanolo.vocalia.util.InternalDebug
+import io.github.stringmanolo.vocalia.core.AppLauncher
 
 class VocaliaService : Service() {
 
@@ -30,21 +31,25 @@ class VocaliaService : Service() {
     private lateinit var core: VocaliaCore
 
     override fun onCreate() {
-        super.onCreate()
-        InternalDebug.mark("Service: onCreate")
+    super.onCreate()
+    InternalDebug.mark("Service: onCreate")
 
-        ttsManager = TtsManager(this)
-        voskEngine = VoskEngine(this)
-        core = VocaliaCore(voskEngine, ttsManager, CommandParser()) { msg ->
-            InternalDebug.mark("[core] $msg")
-        }
+    ttsManager = TtsManager(this)
+    voskEngine = VoskEngine(this)
+    core = VocaliaCore(
+        voskEngine = voskEngine,
+        ttsManager = ttsManager,
+        commandParser = CommandParser(),
+        appLauncher = AppLauncher(this),
+        log = { msg -> InternalDebug.mark("[core] $msg") }
+    )
 
-        ttsManager.onEngineReady = {
-            InternalDebug.mark("Service: TTS listo, arrancando core")
-            core.start()
-        }
-        ttsManager.init()
+    ttsManager.onEngineReady = {
+        InternalDebug.mark("Service: TTS listo, arrancando core")
+        core.start()
     }
+    ttsManager.init()
+}
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()

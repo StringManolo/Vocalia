@@ -7,27 +7,36 @@ import java.util.Locale
 sealed class CommandResult {
     object Sleep : CommandResult()
     data class Response(val text: String) : CommandResult()
-    /** true = voz inteligente (Sherpa), false = voz por defecto (espeak). */
     data class SetVoiceMode(val intelligent: Boolean) : CommandResult()
+    data class OpenApp(val appName: String) : CommandResult()
 }
 
 class CommandParser {
 
     private val esLocale = Locale("es", "ES")
 
+    private val openPrefixes = listOf(
+        "abre la app ", "abre el ", "abre la ", "abre ",
+        "abrir la app ", "abrir el ", "abrir la ", "abrir ",
+        "lanza la app ", "lanza el ", "lanza la ", "lanza ",
+        "abreme ", "abreme la ", "abreme el ", "arranca", "arráncame"
+    )
+
     fun parse(raw: String): CommandResult {
         val text = raw.lowercase(esLocale).trim()
         return when {
             text.isBlank() -> CommandResult.Response("no te he entendido")
 
-            // Cambio de motor (antes de "hora" para evitar ambigüedades)
+            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "para", "parar", "silencio", "callate") ->
+                CommandResult.Sleep
+
             matches(text, "inteligente", "piper", "neuronal", "natural") ->
                 CommandResult.SetVoiceMode(intelligent = true)
+
             matches(text, "por defecto", "normal", "espeak", "robotica", "robótica", "robotizada") ->
                 CommandResult.SetVoiceMode(intelligent = false)
 
-            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "para", "parar", "silencio", "callate") ->
-                CommandResult.Sleep
+            extractAppName(text) != null -> CommandResult.OpenApp(extractAppName(text)!!)
 
             matches(text, "hora") -> CommandResult.Response(currentTime())
             matches(text, "fecha", "dia", "día") -> CommandResult.Response(currentDate())
@@ -38,10 +47,18 @@ class CommandParser {
         }
     }
 
-    private fun matches(text: String, vararg keywords: String): Boolean =
-        keywords.any { kw ->
-            text.contains(kw) || kw.contains(text) || commonPrefix(text, kw) >= 4
+    private fun extractAppName(text: String): String? {
+        for (p in openPrefixes) {
+            if (text.startsWith(p)) {
+                val app = text.removePrefix(p).trim()
+                return if (app.isNotBlank()) app else null
+            }
         }
+        return null
+    }
+
+    private fun matches(text: String, vararg keywords: String): Boolean =
+        keywords.any { kw -> text.contains(kw) || kw.contains(text) || commonPrefix(text, kw) >= 4 }
 
     private fun commonPrefix(a: String, b: String): Int {
         val n = minOf(a.length, b.length)
