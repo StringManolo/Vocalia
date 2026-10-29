@@ -16,7 +16,7 @@ class TtsManager(private val context: Context) {
     private var sherpaEngine: SherpaOnnxEngine? = null
 
     @Volatile private var sherpaReady = false
-    @Volatile private var sherpaInitAttempted = false
+    @Volatile private var sherpaLoading = false
 
     private fun dbg(msg: String) {
         InternalDebug.mark("[${Thread.currentThread().name}] TtsManager: $msg")
@@ -31,7 +31,7 @@ class TtsManager(private val context: Context) {
                 currentEngine = espeak
                 currentMode = EngineMode.ESPEAK
                 onEngineReady?.invoke(espeak)
-                tryInitSherpaInBackground()
+                // Sherpa NO se carga aquí. Se carga cuando se pide.
             },
             onError = { error ->
                 dbg("EspeakNg falló al inicializar: $error")
@@ -39,31 +39,56 @@ class TtsManager(private val context: Context) {
         )
     }
 
-    private fun tryInitSherpaInBackground() {
-        if (sherpaInitAttempted) return
-        sherpaInitAttempted = true
-        Thread({
-            try {
-                dbg("Sherpa: init en segundo plano START")
-                val sherpa = SherpaOnnxEngine(context)
-                sherpaEngine = sherpa
-                sherpa.init(
-                    onReady = {
-                        sherpaReady = true
-                        dbg("Sherpa: listo (no activado)")
-                    },
-                    onError = { err ->
-                        dbg("Sherpa: no disponible -> $err")
-                        sherpaEngine = null
-                        sherpaReady = false
-                    }
-                )
-            } catch (t: Throwable) {
-                dbg("Sherpa: init THREW ${t.javaClass.simpleName}: ${t.message}")
-                sherpaEngine = null
-                sherpaReady = false
+    /**
+     * Carga Sherpa bajo demanda (si no está cargado).
+     * Bloquea hasta 15 s. Devuelve true si está listo.
+     */
+    private fun ensureSherpaLoaded(): Boolean {
+        if (sherpaReady) return true
+        if (sherpaLoading) {
+            // Otra llamada ya está cargando; esperar hasta 15 s
+            val t0 = System.currentTimeMillis()
+            while (sherpaLoading && System.currentTimeMillis() - t0 < 15_000L) {
+                Thread.sleep(100)
             }
-        }, "sherpa-init").start()
+            return sherpaReady
+        }
+
+        sherpaLoading = true
+        try {
+            dbg("Sherpa: carga bajo demanda START")
+            val sherpa = SherpaOnnxEngine(context)
+            sherpaEngine = sherpa
+
+            // init es asíncrono en SherpaOnnxEngine; esperamos con latch
+            val latch = java.util.concurrent.CountDownLatch(1)
+            @Volatile var ok = false
+            sherpa.init(
+                onReady = {
+                    ok = true
+                    sherpaReady = true
+                    latch.countDown()
+                },
+                onError = { err ->
+                    dbg("Sherpa: no disponible -> $err")
+                    sherpaEngine = null
+                    sherpaReady = false
+                    latch.countDown()
+                }
+            )
+            val done = latch.await(15, java.util.concurrent.TimeUnit.SECONDS)
+            if (!done) {
+                dbg("Sherpa: timeout esperando init")
+            }
+            return ok
+        } catch (t: Throwable) {
+            dbg("Sherpa: ensureSherpaLoaded THREW ${t.javaClass.simpleName}: ${t.message}")
+            sherpaEngine = null
+            sherpaReady = false
+            return false
+        } finally {
+            sherpaLoading = false
+        }
     }
 
     fun setEngine(mode: EngineMode): Pair<Boolean, String> {
@@ -76,19 +101,22 @@ class TtsManager(private val context: Context) {
                     dbg("Motor cambiado a EspeakNg")
                     true to "voz por defecto activada"
                 } else {
-                    dbg("setEngine(ESPEAK) sin motor")
                     false to "espeak no disponible"
                 }
             }
             EngineMode.SHERPA -> {
+                // Cargar bajo demanda en un hilo, con timeout
+                if (!ensureSherpaLoaded()) {
+                    dbg("setEngine(SHERPA): no se pudo cargar")
+                    return false to "voz inteligente no disponible"
+                }
                 val s = sherpaEngine
-                if (sherpaReady && s != null) {
+                if (s != null) {
                     currentEngine = s
                     currentMode = EngineMode.SHERPA
                     dbg("Motor cambiado a SherpaOnnx")
                     true to "voz inteligente activada"
                 } else {
-                    dbg("setEngine(SHERPA) no listo (ready=$sherpaReady, engine=${s != null})")
                     false to "voz inteligente no disponible"
                 }
             }
@@ -98,7 +126,6 @@ class TtsManager(private val context: Context) {
     fun speak(text: String, onComplete: (() -> Unit)? = null) {
         val engine = currentEngine
         if (engine == null) {
-            dbg("speak sin motor")
             onComplete?.invoke()
             return
         }
