@@ -30,24 +30,16 @@ import kotlin.math.abs
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-/**
- * Motor TTS basado en espeak-ng (reecedunn SpeechSynthesis) + AudioTrack en streaming.
- *
- * Cambios respecto a la versión anterior:
- *  - SpeechSynthesis es UNO por proceso (singleton). Antes se creaba uno nuevo en cada
- *    arranque del servicio y la 2.ª locución salía recortada (0,28 s en vez de 1,05 s).
- *  - Nada depende del hilo principal para liberar el audio: un hilo "drain" espera a que
- *    playbackHeadPosition llegue al final (eso mide si el sistema CONSUME el audio).
- *  - Con DIAG_ENABLED = true: tonos de prueba, estadísticas del PCM, volcado a WAV y
- *    reproducción del mismo WAV con MediaPlayer. Todo se escribe en INTERNAL_DEBUG.
- */
 class EspeakNgEngine(context: Context) : TtsEngine {
 
     override val name = "EspeakNg"
 
     companion object {
+        /** true = corre el test suite de audio al arrancar (15 configuraciones). */
+        const val RUN_AUDIO_TEST_SUITE = true
+
         /** true = tonos de prueba al arrancar + volcado WAV + MediaPlayer tras cada locución. */
-        const val DIAG_ENABLED = true
+        const val DIAG_ENABLED = false
 
         private const val TAG = "EspeakNgEngine"
 
@@ -56,11 +48,27 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         @Volatile private var sharedSynth: SpeechSynthesis? = null
         @Volatile private var activeEngine: EspeakNgEngine? = null
 
-        // Un solo hilo de síntesis para todo el proceso (el motor nativo no es reentrante).
         private val synthExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "espeak-synth").apply { isDaemon = true }
         }
     }
+
+    private class TestConfig(
+        val id: Int,
+        val description: String,
+        val usage: Int,
+        val contentType: Int,
+        val transferMode: Int,
+        val bufSizeStrategy: String, // "minBuf" | "minBuf*2" | "minBuf*4" | "size" | "64k"
+        val setVolume: Boolean,
+        val requestFocus: Boolean,
+        val writeMode: String // "oneshot" | "incremental"
+    )
+
+    private class TestMode(
+        val config: TestConfig,
+        val buffer: ByteArrayOutputStream
+    )
 
     private class DrainJob(
         val id: Int,
@@ -87,18 +95,15 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     @Volatile private var pendingText: String? = null
     @Volatile private var lastSpeakAt = 0L
 
-    // Para descartar PCM de locuciones interrumpidas.
     private val generation = AtomicInteger(0)
     @Volatile private var synthGeneration = 0
 
-    // Estado de audio (todo bajo audioLock)
     private val audioLock = Any()
     private var track: AudioTrack? = null
     private val liveJobs = mutableListOf<DrainJob>()
     private var focusRequest: AudioFocusRequest? = null
     @Volatile private var drainThread: Thread? = null
 
-    // Estadísticas de la locución en curso (bajo audioLock)
     private var uttId = 0
     private var uttBytes = 0L
     private var uttChunks = 0
@@ -108,9 +113,8 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     private var uttSamples = 0L
     private var uttWav = ByteArrayOutputStream()
 
-    // ---------------------------------------------------------------
-    // Logging
-    // ---------------------------------------------------------------
+    // Modo test: cuando no es null, onPcm acumula en buffer en vez de reproducir.
+    @Volatile private var testMode: TestMode? = null
 
     private fun dbg(msg: String) {
         InternalDebug.mark("[${Thread.currentThread().name}] $msg")
@@ -121,13 +125,9 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         InternalDebug.mark("[${Thread.currentThread().name}] $msg -> ${t.javaClass.simpleName}: ${t.message} :: $st")
     }
 
-    // ---------------------------------------------------------------
-    // init()
-    // ---------------------------------------------------------------
-
     override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
         InternalDebug.init(ctx)
-        dbg("init START engine=${System.identityHashCode(this)} diag=$DIAG_ENABLED pid=${android.os.Process.myPid()}")
+        dbg("init START engine=${System.identityHashCode(this)} diag=$DIAG_ENABLED testSuite=$RUN_AUDIO_TEST_SUITE pid=${android.os.Process.myPid()}")
         Thread({ initWorker(onReady, onError) }, "espeak-init").start()
     }
 
@@ -151,17 +151,16 @@ class EspeakNgEngine(context: Context) : TtsEngine {
 
             try { s.Rate.setValue(175) } catch (t: Throwable) { dbgErr("init: Rate.setValue THREW", t) }
 
-            try {
-                val voices = s.availableVoices
-                dbg("init: ${voices.size} voices disponibles")
-                voices.take(8).forEach { v -> dbg("init:   voice ${v.identifier}") }
-            } catch (t: Throwable) {
-                dbgErr("init: availableVoices THREW", t)
-            }
-
             activeEngine = this
 
             diagAudioState("init")
+
+            if (RUN_AUDIO_TEST_SUITE) {
+                dbg("init: ===== INICIANDO AUDIO TEST SUITE (15 configs) =====")
+                runAudioTestSuite(s)
+                dbg("init: ===== AUDIO TEST SUITE COMPLETADO =====")
+            }
+
             if (DIAG_ENABLED) runStartupAudioTests()
 
             initialized = true
@@ -183,7 +182,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    /** Un único SpeechSynthesis por proceso; el callback delega en el motor activo. */
     private fun obtainSharedSynth(): SpeechSynthesis {
         return synchronized(initLock) {
             val existing = sharedSynth
@@ -204,7 +202,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                     override fun onSynthWordBoundary(
                         textPosition: Int, textLength: Int, markerInFrames: Int
                     ) {
-                        // Futuro: resaltado de palabra
                     }
                 }
                 dbg("synth: callback creado (la librería nativa cargó bien)")
@@ -226,9 +223,205 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    // ---------------------------------------------------------------
-    // Extracción de datos de voz
-    // ---------------------------------------------------------------
+    // ===============================================================
+    // AUDIO TEST SUITE
+    // ===============================================================
+
+    private fun buildTestConfigs(): List<TestConfig> = listOf(
+        // Grupo A: STREAM, write de una vez, contentType MUSIC
+        TestConfig(1, "STREAM oneshot MUSIC buf=size vol=no focus=no",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
+        TestConfig(2, "STREAM oneshot MUSIC buf=size vol=no focus=sí",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "size", false, true, "oneshot"),
+        TestConfig(3, "STREAM oneshot MUSIC buf=size vol=sí focus=sí",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "size", true, true, "oneshot"),
+        TestConfig(4, "STREAM oneshot MUSIC buf=minBuf vol=no focus=no",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "minBuf", false, false, "oneshot"),
+        TestConfig(5, "STREAM oneshot MUSIC buf=64k vol=no focus=no",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "64k", false, false, "oneshot"),
+
+        // Grupo B: STATIC, write de una vez
+        TestConfig(6, "STATIC oneshot MUSIC buf=size vol=no focus=no",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STATIC, "size", false, false, "oneshot"),
+        TestConfig(7, "STATIC oneshot MUSIC buf=size vol=sí focus=sí",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STATIC, "size", true, true, "oneshot"),
+        TestConfig(8, "STATIC oneshot MUSIC buf=size vol=no focus=sí",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STATIC, "size", false, true, "oneshot"),
+
+        // Grupo C: contentType SPEECH
+        TestConfig(9, "STREAM oneshot SPEECH buf=size vol=no focus=no",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_SPEECH,
+            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
+        TestConfig(10, "STATIC oneshot SPEECH buf=size vol=no focus=no",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_SPEECH,
+            AudioTrack.MODE_STATIC, "size", false, false, "oneshot"),
+
+        // Grupo D: otros usages
+        TestConfig(11, "STREAM oneshot ASSIST_ACCESSIBILITY MUSIC buf=size",
+            AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
+        TestConfig(12, "STREAM oneshot ASSIST_SONIFICATION MUSIC buf=size",
+            AudioAttributes.USAGE_ASSISTANCE_SONIFICATION, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
+        TestConfig(13, "STREAM oneshot VOICE_COMMUNICATION MUSIC buf=size",
+            AudioAttributes.USAGE_VOICE_COMMUNICATION, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
+        TestConfig(14, "STREAM oneshot GAME MUSIC buf=size",
+            AudioAttributes.USAGE_GAME, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "size", false, false, "oneshot"),
+
+        // Grupo E: incremental (control — reproduce el bug)
+        TestConfig(15, "STREAM incremental MUSIC buf=64k vol=sí focus=sí",
+            AudioAttributes.USAGE_MEDIA, AudioAttributes.CONTENT_TYPE_MUSIC,
+            AudioTrack.MODE_STREAM, "64k", true, true, "incremental"),
+    )
+
+    private fun runAudioTestSuite(s: SpeechSynthesis) {
+        val configs = buildTestConfigs()
+        for (config in configs) {
+            try {
+                dbg("=== TEST ${config.id}: ${config.description} ===")
+
+                // 1. Sintetizar "N. Vocalia activa" y acumular el PCM en testMode.buffer
+                val buffer = ByteArrayOutputStream()
+                testMode = TestMode(config, buffer)
+                s.synthesize("${config.id}. Vocalia activa", false)
+                testMode = null
+
+                val pcm = buffer.toByteArray()
+                if (pcm.isEmpty()) {
+                    dbg("TEST ${config.id}: PCM vacío, saltando")
+                    continue
+                }
+
+                // 2. Reproducir el PCM con la configuración de este test
+                playWithConfig(pcm, config, s.sampleRate)
+
+                // 3. Pausa para que el usuario distinga cada prueba
+                Thread.sleep(1500)
+            } catch (t: Throwable) {
+                dbgErr("TEST ${config.id} THREW", t)
+                testMode = null
+            }
+        }
+    }
+
+    private fun playWithConfig(pcm: ByteArray, config: TestConfig, rate: Int) {
+        var t: AudioTrack? = null
+        try {
+            if (config.setVolume) ensureMediaVolumeIsUp()
+            if (config.requestFocus) requestAudioFocusLocked()
+
+            val minBuf = AudioTrack.getMinBufferSize(
+                rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            val bufSize = when (config.bufSizeStrategy) {
+                "minBuf" -> minBuf
+                "minBuf*2" -> minBuf * 2
+                "minBuf*4" -> minBuf * 4
+                "64k" -> 64 * 1024
+                "size" -> pcm.size
+                else -> pcm.size
+            }
+
+            t = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(config.usage)
+                        .setContentType(config.contentType)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(rate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufSize)
+                .setTransferMode(config.transferMode)
+                .build()
+
+            dbg("TEST ${config.id}: track state=${t.state} bufSize=$bufSize pcmSize=${pcm.size} minBuf=$minBuf")
+
+            // MODE_STATIC empieza en STATE_NO_STATIC_DATA (2) hasta el primer write
+            val stateOk = if (config.transferMode == AudioTrack.MODE_STATIC) {
+                t.state == AudioTrack.STATE_NO_STATIC_DATA || t.state == AudioTrack.STATE_INITIALIZED
+            } else {
+                t.state == AudioTrack.STATE_INITIALIZED
+            }
+            if (!stateOk) {
+                dbg("TEST ${config.id}: ABORT state inválido=${t.state}")
+                try { t.release() } catch (_: Throwable) {}
+                return
+            }
+
+            if (config.setVolume) t.setVolume(1.0f)
+
+            t.play()
+            dbg("TEST ${config.id}: play() playState=${safePlayState(t)}")
+
+            when (config.writeMode) {
+                "oneshot" -> {
+                    val written = t.write(pcm, 0, pcm.size)
+                    dbg("TEST ${config.id}: write oneshot=$written de ${pcm.size}")
+                }
+                "incremental" -> {
+                    var offset = 0
+                    while (offset < pcm.size) {
+                        val chunk = minOf(4096, pcm.size - offset)
+                        val written = t.write(pcm, offset, chunk)
+                        if (written <= 0) {
+                            dbg("TEST ${config.id}: write incremental FALLÓ en offset=$offset")
+                            break
+                        }
+                        offset += written
+                        Thread.sleep(20)
+                    }
+                    dbg("TEST ${config.id}: write incremental completado offset=$offset")
+                }
+            }
+
+            // Monitorizar head durante 2s
+            val t0 = SystemClock.elapsedRealtime()
+            var maxHead = 0
+            while (SystemClock.elapsedRealtime() - t0 < 2000) {
+                val head = safeHead(t)
+                if (head > maxHead) maxHead = head
+                Thread.sleep(100)
+            }
+            val frames = pcm.size / 2
+            dbg("TEST ${config.id}: head final=$maxHead/$frames playState=${safePlayState(t)} underruns=${try { t.underrunCount } catch (_: Throwable) { -1 }}")
+            if (maxHead > 0) {
+                dbg("TEST ${config.id}: ✅ EL SISTEMA CONSUMIÓ EL AUDIO")
+            } else {
+                dbg("TEST ${config.id}: ❌ head=0, el sistema NO consumió el audio")
+            }
+
+            try { t.stop() } catch (_: Throwable) {}
+            try { t.release() } catch (_: Throwable) {}
+            t = null
+
+            if (config.requestFocus) abandonAudioFocusLocked()
+        } catch (ex: Throwable) {
+            dbgErr("TEST ${config.id} playWithConfig THREW", ex)
+            try { t?.stop() } catch (_: Throwable) {}
+            try { t?.release() } catch (_: Throwable) {}
+            if (config.requestFocus) abandonAudioFocusLocked()
+        }
+    }
+
+    // ===============================================================
+    // Resto del código: idéntico al de Claude
+    // ===============================================================
 
     private fun extractVoiceDataIfNeeded() {
         val filesRoot = ctx.filesDir
@@ -288,15 +481,10 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         false
     }
 
-    // ---------------------------------------------------------------
-    // Volumen, foco de audio y estado del sistema
-    // ---------------------------------------------------------------
-
     private fun ensureMediaVolumeIsUp() {
         try {
             val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-            dbg("volumen MUSIC=$current/$max")
             if (current == 0) {
                 val target = maxOf(1, max / 2)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
@@ -307,7 +495,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    /** Llamar con audioLock tomado. */
     private fun requestAudioFocusLocked() {
         if (focusRequest != null) return
         try {
@@ -321,18 +508,16 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 .build()
             val result = audioManager.requestAudioFocus(req)
             focusRequest = req
-            dbg("requestAudioFocus: result=$result (1=GRANTED, 0=FAILED, 2=DELAYED)")
+            dbg("requestAudioFocus: result=$result")
         } catch (t: Throwable) {
             dbgErr("requestAudioFocus THREW", t)
         }
     }
 
-    /** Llamar con audioLock tomado. */
     private fun abandonAudioFocusLocked() {
         val req = focusRequest ?: return
         try {
             audioManager.abandonAudioFocusRequest(req)
-            dbg("abandonAudioFocus")
         } catch (t: Throwable) {
             dbgErr("abandonAudioFocus THREW", t)
         } finally {
@@ -341,59 +526,30 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     }
 
     private fun describeDevice(d: AudioDeviceInfo?): String =
-        // type: 1=EARPIECE 2=SPEAKER 3=WIRED_HEADSET 4=WIRED_HEADPHONES 7=BT_SCO 8=BT_A2DP 18=TELEPHONY
-        if (d == null) "null" else "type=${d.type} id=${d.id} name=${d.productName} sink=${d.isSink}"
+        if (d == null) "null" else "type=${d.type} id=${d.id} name=${d.productName}"
 
     private fun diagAudioState(tag: String) {
         try {
             val am = audioManager
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            dbg("DIAG[$tag] dispositivo=${Build.MANUFACTURER} ${Build.MODEL} sdk=${Build.VERSION.SDK_INT} display=${Build.DISPLAY}")
-            dbg(
-                "DIAG[$tag] audioMode=${am.mode} (0=NORMAL, 3=IN_COMMUNICATION) ringer=${am.ringerMode} (2=NORMAL) " +
-                    "dndFilter=${nm.currentInterruptionFilter} (1=ALL, 2=PRIORITY, 3=NONE/total silencio, 4=ALARMS)"
-            )
-            val streams = listOf(
-                "MUSIC" to AudioManager.STREAM_MUSIC,
-                "ALARM" to AudioManager.STREAM_ALARM,
-                "NOTIF" to AudioManager.STREAM_NOTIFICATION,
-                "SYSTEM" to AudioManager.STREAM_SYSTEM,
-                "VOICE_CALL" to AudioManager.STREAM_VOICE_CALL
-            )
-            val vols = streams.joinToString(" ") { (n, id) ->
-                "$n=${am.getStreamVolume(id)}/${am.getStreamMaxVolume(id)}${if (am.isStreamMute(id)) "(MUTED)" else ""}"
-            }
-            dbg("DIAG[$tag] volúmenes: $vols")
-            dbg(
-                "DIAG[$tag] speakerphone=${am.isSpeakerphoneOn} a2dp=${am.isBluetoothA2dpOn} " +
-                    "sco=${am.isBluetoothScoOn} wired=${am.isWiredHeadsetOn} musicActive=${am.isMusicActive}"
-            )
+            dbg("DIAG[$tag] device=${Build.MANUFACTURER} ${Build.MODEL} sdk=${Build.VERSION.SDK_INT}")
+            dbg("DIAG[$tag] mode=${am.mode} ringer=${am.ringerMode} dnd=${nm.currentInterruptionFilter}")
+            dbg("DIAG[$tag] MUSIC=${am.getStreamVolume(AudioManager.STREAM_MUSIC)}/${am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)}")
+            dbg("DIAG[$tag] speakerphone=${am.isSpeakerphoneOn} a2dp=${am.isBluetoothA2dpOn} wired=${am.isWiredHeadsetOn}")
             am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).forEach {
-                dbg("DIAG[$tag] salida disponible: ${describeDevice(it)}")
+                dbg("DIAG[$tag] out: ${describeDevice(it)}")
             }
-            dbg(
-                "DIAG[$tag] hw outputSampleRate=${am.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)} " +
-                    "framesPerBuffer=${am.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)}"
-            )
         } catch (t: Throwable) {
             dbgErr("diagAudioState THREW", t)
         }
     }
 
-    // ---------------------------------------------------------------
-    // Tests de arranque (solo si DIAG_ENABLED)
-    // ---------------------------------------------------------------
-
     private fun runStartupAudioTests() {
         try {
             ensureMediaVolumeIsUp()
-            dbg("DIAG: ===== TEST 1/2: tono 440 Hz con AudioTrack (1 s) =====")
             diagTone()
             Thread.sleep(300)
-            dbg("DIAG: ===== TEST 2/2: ToneGenerator (0,6 s) =====")
             diagToneGenerator()
-            Thread.sleep(300)
-            dbg("DIAG: ===== tests de arranque terminados; ahora hablará espeak =====")
         } catch (t: Throwable) {
             dbgErr("runStartupAudioTests THREW", t)
         }
@@ -425,22 +581,9 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
             tr = t
-            dbg("DIAG tono: state=${t.state} (1=OK) session=${t.audioSessionId}")
             t.play()
-            val w = t.write(tone, 0, n)
-            dbg("DIAG tono: write=$w de $n muestras")
-            var head = 0
-            for (i in 0 until 25) {
-                Thread.sleep(100)
-                head = safeHead(t)
-                dbg("DIAG tono: head=$head/$n playState=${safePlayState(t)} (3=PLAYING) routed=${describeDevice(t.routedDevice)}")
-                if (head >= n) break
-            }
-            dbg(
-                "DIAG tono: RESULTADO head=$head/$n -> " +
-                    if (head >= n) "el sistema CONSUMIÓ el tono (¿lo oíste?)" else "el sistema NO consumió el tono"
-            )
-            Thread.sleep(250)
+            t.write(tone, 0, n)
+            Thread.sleep(1200)
         } catch (t: Throwable) {
             dbgErr("diagTone THREW", t)
         } finally {
@@ -453,8 +596,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         var tg: ToneGenerator? = null
         try {
             tg = ToneGenerator(AudioManager.STREAM_MUSIC, 100)
-            val ok = tg.startTone(ToneGenerator.TONE_DTMF_5, 600)
-            dbg("DIAG ToneGenerator: startTone devolvió $ok")
+            tg.startTone(ToneGenerator.TONE_DTMF_5, 600)
             Thread.sleep(800)
         } catch (t: Throwable) {
             dbgErr("diagToneGenerator THREW", t)
@@ -462,10 +604,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             try { tg?.release() } catch (_: Throwable) {}
         }
     }
-
-    // ---------------------------------------------------------------
-    // Reproducción (streaming)
-    // ---------------------------------------------------------------
 
     private fun safeHead(t: AudioTrack): Int = try { t.playbackHeadPosition } catch (e: Throwable) { -1 }
     private fun safePlayState(t: AudioTrack): Int = try { t.playState } catch (e: Throwable) { -1 }
@@ -480,7 +618,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         uttWav.reset()
     }
 
-    /** Llamar con audioLock tomado. Devuelve false si no se pudo crear el track. */
     private fun openTrackLocked(rate: Int): Boolean {
         if (rate <= 0) {
             dbg("openTrack: ABORT sampleRate inválido=$rate")
@@ -502,8 +639,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 .setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
-// SPEECH is not robust //.setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
                 .setAudioFormat(
@@ -521,11 +657,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             return false
         }
 
-        dbg(
-            "openTrack: state=${t.state} (1=OK) rate=$rate minBuf=$minBuf bufSize=$bufSize " +
-                "bufferFrames=${t.bufferSizeInFrames} session=${t.audioSessionId} " +
-                "desdeSpeak=${SystemClock.elapsedRealtime() - lastSpeakAt}ms"
-        )
         if (t.state != AudioTrack.STATE_INITIALIZED) {
             dbg("openTrack: ABORT el track no se inicializó")
             try { t.release() } catch (_: Throwable) {}
@@ -535,7 +666,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         try { t.setVolume(1.0f) } catch (e: Throwable) { dbgErr("openTrack: setVolume THREW", e) }
         requestAudioFocusLocked()
         t.play()
-        dbg("openTrack: play() playState=${safePlayState(t)} (3=PLAYING) routed=${describeDevice(t.routedDevice)}")
+        dbg("openTrack: play() playState=${safePlayState(t)} routed=${describeDevice(t.routedDevice)}")
 
         track = t
         uttId++
@@ -543,20 +674,21 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         return true
     }
 
-    /** Llamado por el callback nativo, en el hilo de síntesis. */
     private fun onPcm(pcm: ByteArray) {
-        if (shuttingDown) return
-        if (synthGeneration != generation.get()) {
-            dbg("onPcm: DESCARTADO size=${pcm.size} (synthGen=$synthGeneration != gen=${generation.get()})")
+        // Modo test: acumular en el buffer de la config actual
+        val tm = testMode
+        if (tm != null) {
+            synchronized(tm.buffer) { tm.buffer.write(pcm) }
             return
         }
+
+        if (shuttingDown) return
+        if (synthGeneration != generation.get()) return
         val rate = sharedSynth?.sampleRate ?: 0
 
-        // Si no hay track abierto, espera a que termine el audio de la locución anterior.
         if (track == null) {
             val prev = drainThread
             if (prev != null && prev.isAlive) {
-                dbg("onPcm: esperando a que acabe la locución anterior")
                 try { prev.join(15000) } catch (_: InterruptedException) {}
             }
         }
@@ -566,7 +698,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             track
         } ?: return
 
-        // Estadísticas del PCM (16 bit little endian)
         var peak = 0
         var sumSq = 0.0
         var zeros = 0L
@@ -582,34 +713,26 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         val written = try {
             t.write(pcm, 0, pcm.size)
         } catch (e: Throwable) {
-            dbgErr("onPcm: write THREW", e)
             -99
         }
 
-        var chunkNo = 0
         synchronized(audioLock) {
             if (written > 0) {
                 uttBytes += written
                 uttWav.write(pcm, 0, written)
             }
             uttChunks++
-            chunkNo = uttChunks
             if (peak > uttPeak) uttPeak = peak
             uttSumSq += sumSq
             uttZeroSamples += zeros
             uttSamples += n
         }
-
-        val rms = if (n > 0) sqrt(sumSq / n).toInt() else 0
-        val zeroPct = if (n > 0) (zeros * 100 / n).toInt() else 100
-        dbg(
-            "onPcm #$chunkNo: size=${pcm.size} written=$written (negativo=error: -3 INVALID_OP, -2 BAD_VALUE, -6 DEAD) " +
-                "peak=$peak/32767 rms=$rms ceros=$zeroPct% head=${safeHead(t)} playState=${safePlayState(t)}"
-        )
     }
 
-    /** Llamado al terminar la síntesis (callback nativo o fallback tras synthesize()). */
     private fun onPcmComplete(fromCallback: Boolean) {
+        // Modo test: no hacer nada, el test suite gestiona la reproducción
+        if (testMode != null) return
+
         if (shuttingDown) return
 
         val job: DrainJob? = synchronized(audioLock) {
@@ -630,50 +753,24 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             }
         }
 
-        if (job == null) {
-            if (fromCallback) dbg("onPcmComplete: sin track activo (locución vacía o descartada)")
-            return
-        }
+        if (job == null) return
 
-        dbg("onPcmComplete(fromCallback=$fromCallback): locución #${job.id} completa, lanzo drain")
         val th = Thread({ drainWorker(job) }, "espeak-drain-${job.id}")
         th.isDaemon = true
         drainThread = th
         th.start()
     }
 
-    /** Espera (sin tocar el hilo principal) a que el sistema consuma todo el audio escrito. */
     private fun drainWorker(job: DrainJob) {
         val frames = (job.bytes / 2).toInt()
         val expectedMs = if (job.rate > 0) frames * 1000L / job.rate else 0L
-        dbg(
-            "drain#${job.id} START bytes=${job.bytes} frames=$frames duración=${expectedMs}ms chunks=${job.chunks} " +
-                "peak=${job.peak}/32767 rms=${job.rms} ceros=${job.zeroPct}%"
-        )
-
         val t0 = SystemClock.elapsedRealtime()
         val deadline = t0 + expectedMs + 3000L
         var head = 0
-        var lastLog = 0L
-        var firstMoveAt = -1L
-        var warnedStuck = false
         var finished = false
 
         while (!job.cancelled && SystemClock.elapsedRealtime() < deadline) {
             head = safeHead(job.track)
-            val now = SystemClock.elapsedRealtime()
-            if (head > 0 && firstMoveAt < 0) {
-                firstMoveAt = now - t0
-                dbg("drain#${job.id}: head empezó a avanzar a los ${firstMoveAt}ms")
-            }
-            if (!warnedStuck && head <= 0 && now - t0 > 1500) {
-                warnedStuck = true
-                dbg("drain#${job.id}: head sigue en $head tras 1,5 s -> el sistema NO está consumiendo el audio")
-            }
-            if (now - lastLog >= 250) {
-                lastLog = now
-                dbg("drain#${job.id}: t=${now - t0}ms head=$head/$frames playState=${safePlayState(job.track)}")
-            }
             if (head >= frames) {
                 finished = true
                 break
@@ -681,27 +778,20 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             try { Thread.sleep(40) } catch (_: InterruptedException) { break }
         }
 
-        if (job.cancelled) {
-            dbg("drain#${job.id}: cancelado por stop/interrupción (head=$head/$frames)")
-            return
-        }
+        if (job.cancelled) return
 
-        val underruns = try { job.track.underrunCount } catch (_: Throwable) { -1 }
-        val routed = try { describeDevice(job.track.routedDevice) } catch (_: Throwable) { "?" }
         if (finished) {
-            dbg("drain#${job.id}: OK el sistema consumió todo ($head/$frames) en ${SystemClock.elapsedRealtime() - t0}ms underruns=$underruns routed=$routed")
+            dbg("drain#${job.id}: OK ($head/$frames)")
         } else {
-            dbg("drain#${job.id}: TIMEOUT head=$head/$frames underruns=$underruns playState=${safePlayState(job.track)} routed=$routed")
+            dbg("drain#${job.id}: TIMEOUT head=$head/$frames")
         }
 
-        // Margen para que el HAL termine de reproducir la cola.
         try { Thread.sleep(250) } catch (_: InterruptedException) {}
 
         synchronized(audioLock) {
             if (liveJobs.remove(job)) releaseTrack(job.track)
             if (track == null && liveJobs.isEmpty()) abandonAudioFocusLocked()
         }
-        dbg("drain#${job.id}: track liberado")
 
         if (DIAG_ENABLED && !job.cancelled) diagWavAndMediaPlayer(job)
     }
@@ -717,11 +807,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         synchronized(audioLock) {
             val t = track
             track = null
-            if (t != null) {
-                dbg("release[$reason]: liberando track actual")
-                releaseTrack(t)
-            }
-            if (liveJobs.isNotEmpty()) dbg("release[$reason]: cancelando ${liveJobs.size} drain(s)")
+            if (t != null) releaseTrack(t)
             liveJobs.forEach {
                 it.cancelled = true
                 releaseTrack(it.track)
@@ -732,10 +818,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    // ---------------------------------------------------------------
-    // Diagnóstico: WAV + MediaPlayer (mismo audio por otro camino)
-    // ---------------------------------------------------------------
-
     private fun writeWav(file: File, pcm: ByteArray, sampleRate: Int) {
         val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
         header.put("RIFF".toByteArray(Charsets.US_ASCII))
@@ -743,12 +825,12 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         header.put("WAVE".toByteArray(Charsets.US_ASCII))
         header.put("fmt ".toByteArray(Charsets.US_ASCII))
         header.putInt(16)
-        header.putShort(1.toShort())            // PCM
-        header.putShort(1.toShort())            // mono
+        header.putShort(1.toShort())
+        header.putShort(1.toShort())
         header.putInt(sampleRate)
-        header.putInt(sampleRate * 2)           // byte rate
-        header.putShort(2.toShort())            // block align
-        header.putShort(16.toShort())           // bits por muestra
+        header.putInt(sampleRate * 2)
+        header.putShort(2.toShort())
+        header.putShort(16.toShort())
         header.put("data".toByteArray(Charsets.US_ASCII))
         header.putInt(pcm.size)
         file.outputStream().use {
@@ -758,21 +840,16 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     }
 
     private fun diagWavAndMediaPlayer(job: DrainJob) {
-        if (job.wav.isEmpty()) {
-            dbg("DIAG WAV: no hay PCM que volcar")
-            return
-        }
+        if (job.wav.isEmpty()) return
         val dir = ctx.getExternalFilesDir(null) ?: ctx.filesDir
         val f = File(dir, "espeak_last.wav")
         try {
             writeWav(f, job.wav, job.rate)
-            dbg("DIAG WAV escrito: ${f.absolutePath} size=${f.length()} (cópialo al PC y reprodúcelo)")
         } catch (t: Throwable) {
             dbgErr("DIAG WAV THREW", t)
             return
         }
 
-        dbg("DIAG: ===== TEST 4: el mismo WAV reproducido con MediaPlayer =====")
         val mp = MediaPlayer()
         try {
             mp.setAudioAttributes(
@@ -783,14 +860,12 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             )
             mp.setDataSource(f.absolutePath)
             mp.prepare()
-            val dur = mp.duration
-            dbg("DIAG MediaPlayer: prepared duration=${dur}ms; start()")
             mp.start()
+            val dur = mp.duration
             val t0 = SystemClock.elapsedRealtime()
             while (mp.isPlaying && SystemClock.elapsedRealtime() - t0 < dur + 1500L) {
                 Thread.sleep(50)
             }
-            dbg("DIAG MediaPlayer: terminado pos=${mp.currentPosition}/${dur}ms")
         } catch (t: Throwable) {
             dbgErr("DIAG MediaPlayer THREW", t)
         } finally {
@@ -798,62 +873,39 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    // ---------------------------------------------------------------
-    // TtsEngine
-    // ---------------------------------------------------------------
-
     override fun speak(text: String, interruptible: Boolean) {
-        dbg("speak(\"$text\", interruptible=$interruptible) initialized=$initialized")
         if (!initialized) {
             pendingText = text
-            dbg("speak: motor no listo, texto en cola")
             return
         }
-        val s = sharedSynth
-        if (s == null) {
-            dbg("speak: sharedSynth es null, no puedo hablar")
-            return
-        }
-
+        val s = sharedSynth ?: return
         lastSpeakAt = SystemClock.elapsedRealtime()
 
         val gen: Int
         if (interruptible) {
             gen = generation.incrementAndGet()
-            try { s.stop() } catch (t: Throwable) { dbgErr("speak: synth.stop THREW", t) }
+            try { s.stop() } catch (_: Throwable) {}
             releaseEverything("speak(interruptible)")
         } else {
             gen = generation.get()
         }
 
         synthExecutor.execute {
-            if (shuttingDown) {
-                dbg("synth: motor cerrado, omito")
-                return@execute
-            }
-            if (generation.get() != gen) {
-                dbg("synth: locución obsoleta (gen=$gen != ${generation.get()}), omito")
-                return@execute
-            }
+            if (shuttingDown) return@execute
+            if (generation.get() != gen) return@execute
             try {
                 synthGeneration = gen
-                val t0 = SystemClock.elapsedRealtime()
-                dbg("synth: synthesize START \"$text\" gen=$gen")
                 s.synthesize(text, false)
-                dbg("synth: synthesize RETURNED tras ${SystemClock.elapsedRealtime() - t0}ms")
-                // Por si el callback de "completo" no llegó: vacía lo pendiente.
                 onPcmComplete(false)
             } catch (t: Throwable) {
-                dbgErr("synth: synthesize THREW", t)
                 VocaliaLogger.e(TAG, "Error synthesize: ${t.message}", t as? Exception)
             }
         }
     }
 
     override fun stop() {
-        dbg("stop()")
         generation.incrementAndGet()
-        try { sharedSynth?.stop() } catch (t: Throwable) { dbgErr("stop: synth.stop THREW", t) }
+        try { sharedSynth?.stop() } catch (_: Throwable) {}
         releaseEverything("stop()")
     }
 
@@ -861,19 +913,13 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         try {
             val wpm = (175 * rate).toInt().coerceIn(80, 450)
             sharedSynth?.Rate?.setValue(wpm)
-            dbg("setSpeed($rate) -> $wpm wpm")
-        } catch (t: Throwable) {
-            VocaliaLogger.w(TAG, "Error setSpeed: ${t.message}")
-            dbgErr("setSpeed THREW", t)
-        }
+        } catch (_: Throwable) {}
     }
 
     override fun shutdown() {
-        dbg("shutdown() engine=${System.identityHashCode(this)}")
         shuttingDown = true
         stop()
         if (activeEngine === this) activeEngine = null
         initialized = false
-        // OJO: no se cierra synthExecutor ni sharedSynth; son compartidos por todo el proceso.
     }
 }
