@@ -17,17 +17,33 @@ class CommandParser {
         val text = raw.lowercase(esLocale).trim()
         return when {
             text.isBlank() -> CommandResult.Response("no te he entendido")
-            contains(text, "descansa", "duerme", "para", "silencio") -> CommandResult.Sleep
-            contains(text, "hora") -> CommandResult.Response(currentTime())
-            contains(text, "fecha") || contains(text, "día") -> CommandResult.Response(currentDate())
-            contains(text, "hola") -> CommandResult.Response("hola")
-            contains(text, "estás") || contains(text, "tal") -> CommandResult.Response("bien, gracias")
+            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "para", "parar", "silencio", "callate") ->
+                CommandResult.Sleep
+            matches(text, "hora") -> CommandResult.Response(currentTime())
+            matches(text, "fecha", "dia", "día") -> CommandResult.Response(currentDate())
+            matches(text, "hola") -> CommandResult.Response("hola")
+            matches(text, "estas", "estás", "tal") -> CommandResult.Response("bien, gracias")
             else -> CommandResult.Response("no entiendo")
         }
     }
 
-    private fun contains(text: String, vararg words: String): Boolean =
-        words.any { text.contains(it) }
+    /**
+     * Match flexible:
+     *  - contiene la palabra clave ("descanso" contiene "descans"? no, pero "descansar" sí)
+     *  - la palabra clave contiene al texto ("cansa" está en "descansa")
+     *  - comparten un prefijo de al menos 4 caracteres ("descans" de "descanso"/"descansa")
+     */
+    private fun matches(text: String, vararg keywords: String): Boolean =
+        keywords.any { kw ->
+            text.contains(kw) || kw.contains(text) || commonPrefix(text, kw) >= 4
+        }
+
+    private fun commonPrefix(a: String, b: String): Int {
+        val n = minOf(a.length, b.length)
+        var i = 0
+        while (i < n && a[i] == b[i]) i++
+        return i
+    }
 
     private fun currentTime(): String {
         val fmt = SimpleDateFormat("H 'y' mm", esLocale)

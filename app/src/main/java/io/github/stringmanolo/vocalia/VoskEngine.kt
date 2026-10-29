@@ -1,6 +1,8 @@
 package io.github.stringmanolo.vocalia
 
 import android.content.Context
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.util.Log
 import org.vosk.Model
 import org.vosk.Recognizer
@@ -13,15 +15,18 @@ class VoskEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "VoskEngine"
-        //private const val WAKE_GRAMMAR = """["vocalia", "[unk]"]"""
-        private const val WAKE_GRAMMAR = """["asistente", "asistentes", "[unk]"]"""
+        private const val GRAMMAR = """[
+            "asistente", "asistentes",
+            "que hora es", "que hora", "la hora", "hora es", "qué hora es", "qué hora",
+            "que dia es", "que dia", "que fecha", "fecha", "qué día es", "qué día", "qué fecha",
+            "descansa", "descanso", "descansar", "cansa", "duerme", "para", "parar", "silencio", "callate",
+            "hola", "que tal", "qué tal", "como estas", "cómo estás",
+            "[unk]"
+        ]"""
     }
-
-    enum class Mode { WAKE, COMMAND }
 
     private var model: Model? = null
     private var speechService: SpeechService? = null
-    private var currentMode: Mode? = null
 
     var onResult: ((String) -> Unit)? = null
     var onPartialResult: ((String) -> Unit)? = null
@@ -59,44 +64,47 @@ class VoskEngine(private val context: Context) {
         )
     }
 
-    /** Cambia la gramática activa. Recrea Recognizer+SpeechService. Idempotente. */
-    fun setMode(mode: Mode) {
-        if (currentMode == mode) return
-        stopListening()
-
+    /** Arranca el reconocimiento con la gramática completa. Idempotente. */
+    fun startListening() {
+        if (speechService != null) return
         val m = model ?: run {
-            Log.w(TAG, "setMode sin modelo")
+            Log.w(TAG, "startListening sin modelo")
             return
         }
         try {
-            val recognizer = when (mode) {
-                Mode.WAKE -> Recognizer(m, 16000.0f, WAKE_GRAMMAR)
-                Mode.COMMAND -> Recognizer(m, 16000.0f)
-            }
+            val recognizer = Recognizer(m, 16000.0f, GRAMMAR)
             speechService = SpeechService(recognizer, 16000.0f)
             speechService?.startListening(listener)
-            currentMode = mode
-            Log.i(TAG, "setMode($mode)")
+            Log.i(TAG, "startListening OK")
         } catch (e: IOException) {
-            Log.e(TAG, "setMode($mode) falló", e)
-            onError?.invoke("Error setMode: ${e.message}")
+            Log.e(TAG, "startListening falló", e)
+            onError?.invoke("Error startListening: ${e.message}")
         }
-    }
-
-    /** Pausa el reconocimiento sin descargar el modelo. */
-    fun pause() {
-        stopListening()
     }
 
     fun stopListening() {
         speechService?.stop()
         speechService = null
-        currentMode = null
     }
 
     fun shutdown() {
         stopListening()
         model?.close()
         model = null
+    }
+
+    /** Pitido corto (100 ms) para feedback. No bloquea. */
+    fun beep() {
+        Thread {
+            var tg: ToneGenerator? = null
+            try {
+                tg = ToneGenerator(AudioManager.STREAM_MUSIC, 60)
+                tg.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                Thread.sleep(150)
+            } catch (_: Throwable) {
+            } finally {
+                try { tg?.release() } catch (_: Throwable) {}
+            }
+        }.start()
     }
 }
