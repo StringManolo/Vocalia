@@ -25,6 +25,7 @@ android {
       keyPassword System.getenv("RELEASE_KEY_PASSWORD")
     }
   }
+
   buildTypes {
     release {
       minifyEnabled true
@@ -47,10 +48,11 @@ android {
   }
 
   packaging {
-        jniLibs {
-            excludes += "lib/*/libonnxruntime.so"
-        }
+    jniLibs {
+      excludes += "lib/*/libonnxruntime.so"
     }
+  }
+}
 
 dependencies {
   implementation 'androidx.core:core-ktx:1.13.1'
