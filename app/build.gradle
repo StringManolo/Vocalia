@@ -46,9 +46,10 @@ android {
     jvmTarget = '1.8'
   }                                                                                   }
 
-  packagingOptions {
-        // Excluye la copia de onnxruntime que pueda venir de otras dependencias
-        exclude 'lib/*/libonnxruntime.so'
+  packaging {
+        jniLibs {
+            excludes += "lib/*/libonnxruntime.so"
+        }
     }
 
 dependencies {
