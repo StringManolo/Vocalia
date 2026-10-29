@@ -40,13 +40,13 @@ jobs:
       - name: 📥 Ensure sherpa-onnx AAR is present
         run: |
           set -e
-          AAR_PATH="app/libs/sherpa-onnx-2.0.1.aar"
+          AAR_PATH="app/libs/sherpa-onnx-1.13.4.aar"
           mkdir -p app/libs
           if [ -f "$AAR_PATH" ]; then
             echo "✅ $AAR_PATH ya existe en el repo. No se descarga."
           else
             echo "⚠️ $AAR_PATH no está en el repo. Descargando..."
-            SHERPA_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar"
+            SHERPA_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.4/sherpa-onnx-1.13.4.aar"
             if ! curl -fL --retry 3 -o "$AAR_PATH" "$SHERPA_URL"; then
               echo "❌ No se pudo descargar $SHERPA_URL"
               exit 1
