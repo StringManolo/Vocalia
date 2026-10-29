@@ -17,9 +17,17 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.math.abs
 
 class SherpaOnnxEngine(private val context: Context) : TtsEngine {
+
+    companion object {
+        private const val ASSET_DIR = "tts/vits-piper-es_ES-miro-high"
+        private const val ONNX_FILE = "es_ES-miro-high.onnx"
+        private const val TOKENS_FILE = "tokens.txt"
+        private const val ESPEAK_DATA = "espeak-ng-data"
+    }
 
     override val name = "SherpaOnnx"
     @Volatile override var onComplete: (() -> Unit)? = null
@@ -37,42 +45,102 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
     }
 
     override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
+        Thread({ initWorker(onReady, onError) }, "sherpa-init").start()
+    }
+
+    private fun initWorker(onReady: () -> Unit, onError: (String) -> Unit) {
         try {
+            dbg("init.worker START")
+
+            val base = ensureModelOnDisk()
+            val basePath = base.absolutePath
+            val dataDir = File(base, ESPEAK_DATA)
+            dbg("init: base=$basePath")
+            dbg("init: dataDir=$dataDir (phontab=${File(dataDir, "phontab").exists()}, phondata=${File(dataDir, "phondata").exists()})")
+
+            if (!File(dataDir, "phontab").exists() || !File(dataDir, "phondata").exists()) {
+                dbg("init: espeak-ng-data incompleto")
+                onError("datos de voz incompletos en $dataDir")
+                return
+            }
+
             dbg("init: construyendo OfflineTts")
             val config = OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
                     vits = OfflineTtsVitsModelConfig(
-                        model = "tts/vits-piper-es_ES-miro-high/es_ES-miro-high.onnx",
-                        tokens = "tts/vits-piper-es_ES-miro-high/tokens.txt",
-                        dataDir = "tts/vits-piper-es_ES-miro-high/espeak-ng-data"
+                        model = File(base, ONNX_FILE).absolutePath,
+                        tokens = File(base, TOKENS_FILE).absolutePath,
+                        dataDir = dataDir.absolutePath
                     ),
                     numThreads = 2
                 )
             )
-            val instance = OfflineTts(context.assets, config)
-            tts = instance
-            dbg("init: OfflineTts creado")
 
-            Thread({
-                try {
-                    val t0 = System.currentTimeMillis()
-                    val test = instance.generate("prueba", 0, 1.0f)
-                    val dt = System.currentTimeMillis() - t0
-                    var peak = 0f
-                    for (s in test.samples) if (abs(s) > peak) peak = abs(s)
-                    dbg("smoke: samples=${test.samples.size} rate=${test.sampleRate} peak=$peak took=${dt}ms")
-                    if (test.samples.isEmpty()) {
-                        dbg("smoke: generate() devuelve 0 muestras — el modelo NO funciona")
-                    }
-                } catch (t: Throwable) {
-                    dbg("smoke THREW ${t.javaClass.simpleName}: ${t.message}")
-                }
-            }, "sherpa-smoke").start()
+            val t0 = System.currentTimeMillis()
+            // null = no usar AssetManager, todo por rutas absolutas
+            val instance = OfflineTts(null, config)
+            val dt = System.currentTimeMillis() - t0
+            tts = instance
+            dbg("init: OfflineTts creado en ${dt}ms")
+
+            // Smoke test: generar una palabra y comprobar que hay muestras
+            try {
+                val s0 = System.currentTimeMillis()
+                val test = instance.generate("prueba", 0, 1.0f)
+                val sdt = System.currentTimeMillis() - s0
+                var peak = 0f
+                for (s in test.samples) if (abs(s) > peak) peak = abs(s)
+                dbg("smoke: samples=${test.samples.size} rate=${test.sampleRate} peak=$peak took=${sdt}ms")
+            } catch (t: Throwable) {
+                dbg("smoke THREW ${t.javaClass.simpleName}: ${t.message}")
+            }
 
             onReady()
+            dbg("init.worker END")
         } catch (t: Throwable) {
-            dbg("init falló ${t.javaClass.simpleName}: ${t.message}")
-            onError(t.message ?: "Error desconocido en SherpaOnnx")
+            dbg("init.worker THREW ${t.javaClass.simpleName}: ${t.message}")
+            onError(t.message ?: "Error desconocido")
+        }
+    }
+
+    /**
+     * Copia el modelo completo (onnx, tokens, espeak-ng-data) de assets a filesDir.
+     * Solo la primera vez (marker .ok). Después es instantáneo.
+     */
+    private fun ensureModelOnDisk(): File {
+        val outDir = File(context.filesDir, ASSET_DIR)
+        val marker = File(outDir, ".ok")
+        if (marker.exists()) {
+            dbg("ensureModelOnDisk: ya copiado en ${outDir.path}")
+            return outDir
+        }
+        dbg("ensureModelOnDisk: copiando ${ASSET_DIR} a ${outDir.path}")
+        val t0 = System.currentTimeMillis()
+        if (outDir.exists()) outDir.deleteRecursively()
+        copyAsset(ASSET_DIR, outDir)
+        marker.writeText("1")
+        dbg("ensureModelOnDisk: copiado en ${System.currentTimeMillis() - t0}ms")
+        return outDir
+    }
+
+    private fun copyAsset(path: String, dest: File) {
+        val children = context.assets.list(path)
+        if (children.isNullOrEmpty()) {
+            // Fichero individual o directorio vacío
+            dest.parentFile?.mkdirs()
+            try {
+                context.assets.open(path).use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
+                }
+            } catch (_: java.io.FileNotFoundException) {
+                // Era un directorio vacío
+                dest.mkdirs()
+            }
+        } else {
+            dest.mkdirs()
+            children.forEach { child ->
+                copyAsset("$path/$child", File(dest, child))
+            }
         }
     }
 
@@ -98,7 +166,6 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
 
                 var peak = 0f
                 for (s in audio.samples) if (abs(s) > peak) peak = abs(s)
-
                 dbg("generate: samples=${audio.samples.size} rate=${audio.sampleRate} peak=$peak took=${dt}ms")
 
                 if (audio.samples.isNotEmpty() && peak > 0f) {

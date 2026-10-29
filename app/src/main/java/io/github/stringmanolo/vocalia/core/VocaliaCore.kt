@@ -23,7 +23,7 @@ class VocaliaCore(
         log("start")
         voskEngine.init {
             voskEngine.onResult = { json -> handleResult(json) }
-            voskEngine.onPartialResult = { /* ignorar en MVP */ }
+            voskEngine.onPartialResult = { /* ignorar */ }
             voskEngine.startListening()
             log("Vosk escuchando")
         }
@@ -102,7 +102,7 @@ class VocaliaCore(
                 log("safety timeout EXECUTING")
                 enterIdle()
             }
-        }.also { mainHandler.postDelayed(it, 30_000L) }
+        }.also { mainHandler.postDelayed(it, 60_000L) }
 
         when (val result = commandParser.parse(text)) {
             CommandResult.Sleep -> {
@@ -112,11 +112,30 @@ class VocaliaCore(
                 ttsManager.speak(result.text) { enterIdle() }
             }
             is CommandResult.SetVoiceMode -> {
-                val mode = if (result.intelligent) TtsManager.EngineMode.SHERPA
-                           else TtsManager.EngineMode.ESPEAK
-                val (ok, message) = ttsManager.setEngine(mode)
-                log("setEngine($mode): ok=$ok, message=\"$message\"")
-                ttsManager.speak(message) { enterIdle() }
+                if (result.intelligent) {
+                    // Carga asíncrona: decir "cargando" con espeak y luego cambiar
+                    ttsManager.speak("cargando voz inteligente") {
+                        if (state != State.EXECUTING) return@speak
+                        ttsManager.setEngineAsync(TtsManager.EngineMode.SHERPA) { ok, msg ->
+                            mainHandler.post {
+                                log("setEngineAsync(SHERPA): ok=$ok, msg=$msg")
+                                if (state == State.EXECUTING) {
+                                    ttsManager.speak(msg) { enterIdle() }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Espeak: cambio instantáneo
+                    ttsManager.setEngineAsync(TtsManager.EngineMode.ESPEAK) { ok, msg ->
+                        mainHandler.post {
+                            log("setEngineAsync(ESPEAK): ok=$ok, msg=$msg")
+                            if (state == State.EXECUTING) {
+                                ttsManager.speak(msg) { enterIdle() }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
