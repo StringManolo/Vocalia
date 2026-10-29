@@ -27,6 +27,7 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
 
         requestIgnoreBatteryOptimizations()
+        requestRecordAudioPermissionIfNeeded()
 
         val startButton = findViewById<Button>(R.id.startButton)
         val stopButton  = findViewById<Button>(R.id.stopButton)
@@ -73,6 +74,19 @@ class MainActivity : AppCompatActivity() {
             startActivity(intent)
         }
     }
+
+    private fun requestRecordAudioPermissionIfNeeded() {
+    if (androidx.core.content.ContextCompat.checkSelfPermission(
+            this, android.Manifest.permission.RECORD_AUDIO
+        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+    ) {
+        androidx.core.app.ActivityCompat.requestPermissions(
+            this,
+            arrayOf(android.Manifest.permission.RECORD_AUDIO),
+            201
+        )
+    }
+}
 
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
