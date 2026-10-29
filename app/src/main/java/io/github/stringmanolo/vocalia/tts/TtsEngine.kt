@@ -7,4 +7,7 @@ interface TtsEngine {
     fun setSpeed(rate: Float)
     fun shutdown()
     val name: String
+
+    /** Se invoca cuando la locución actual termina o se cancela. */
+    var onComplete: (() -> Unit)?
 }

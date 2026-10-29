@@ -23,6 +23,7 @@ import java.util.zip.ZipInputStream
 class EspeakNgEngine(context: Context) : TtsEngine {
 
     override val name = "EspeakNg"
+    override var onComplete: (() -> Unit)? = null
 
     companion object {
         private const val TAG = "EspeakNgEngine"
@@ -248,6 +249,11 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             try { t?.release() } catch (_: Throwable) {}
             abandonAudioFocus()
         }
+
+        // NUEVO: notificar al orquestador que la locución ha terminado.
+        val cb = onComplete
+        onComplete = null
+        cb?.invoke()
     }
 
     override fun speak(text: String, interruptible: Boolean) {
@@ -276,11 +282,18 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 val pcmBytes = pcmOut.toByteArray()
                 if (pcmBytes.isNotEmpty() && generation.get() == gen) {
                     playCleanly(pcmBytes, gen)
+                } else {
+                    // No se reprodujo nada: invocar onComplete igualmente para no bloquear.
+                    val cb = onComplete
+                    onComplete = null
+                    cb?.invoke()
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "speak: ${t.message}", t)
-            } finally {
                 pcmBuffer = null
+                val cb = onComplete
+                onComplete = null
+                cb?.invoke()
             }
         }
     }
@@ -289,6 +302,10 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         generation.incrementAndGet()
         try { sharedSynth?.stop() } catch (_: Throwable) {}
         abandonAudioFocus()
+        // NUEVO: desbloquear al orquestador si estaba esperando un callback.
+        val cb = onComplete
+        onComplete = null
+        cb?.invoke()
     }
 
     override fun setSpeed(rate: Float) {

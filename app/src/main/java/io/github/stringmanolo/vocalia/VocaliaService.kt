@@ -9,15 +9,14 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
+import io.github.stringmanolo.vocalia.core.CommandParser
+import io.github.stringmanolo.vocalia.core.VocaliaCore
 import io.github.stringmanolo.vocalia.tts.TtsManager
 import io.github.stringmanolo.vocalia.util.InternalDebug
-import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 class VocaliaService : Service() {
 
     companion object {
-        private const val TAG = "VocaliaService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "vocalia_main_channel"
 
@@ -28,72 +27,34 @@ class VocaliaService : Service() {
 
     private lateinit var ttsManager: TtsManager
     private lateinit var voskEngine: VoskEngine
-
-    private fun dbg(msg: String) {
-        InternalDebug.mark("[${Thread.currentThread().name}] Service: $msg")
-    }
+    private lateinit var core: VocaliaCore
 
     override fun onCreate() {
         super.onCreate()
-        dbg("onCreate")
-        VocaliaLogger.i(TAG, "onCreate")
+        InternalDebug.mark("Service: onCreate")
 
         ttsManager = TtsManager(this)
-        ttsManager.onEngineReady = { engine ->
-            dbg("TTS listo: ${engine.name}")
-            // Cuando TTS está listo, arrancamos Vosk
-            initVosk()
+        voskEngine = VoskEngine(this)
+        core = VocaliaCore(voskEngine, ttsManager, CommandParser()) { msg ->
+            InternalDebug.mark("[core] $msg")
+        }
+
+        ttsManager.onEngineReady = {
+            InternalDebug.mark("Service: TTS listo, arrancando core")
+            core.start()
         }
         ttsManager.init()
     }
 
-    private fun initVosk() {
-        dbg("initVosk START")
-        voskEngine = VoskEngine(this)
-
-        voskEngine.onResult = { json ->
-            val text = extractTextFromVoskJson(json)
-            if (text.isNotEmpty()) {
-                dbg("Vosk onResult: \"$text\"")
-                // Modo loro: repite lo que ha oído
-                ttsManager.speak(text)
-            }
-        }
-
-        voskEngine.onPartialResult = { json ->
-            val text = extractTextFromVoskJson(json, partial = true)
-            if (text.isNotEmpty()) {
-                dbg("Vosk partial: \"$text\"")
-            }
-        }
-
-        voskEngine.onError = { error ->
-            dbg("Vosk error: $error")
-        }
-
-        voskEngine.init {
-            dbg("Vosk modelo cargado, startListening()")
-            voskEngine.startListening()
-        }
-    }
-
-    private fun extractTextFromVoskJson(json: String, partial: Boolean = false): String {
-        return try {
-            val obj = org.json.JSONObject(json)
-            if (partial) obj.optString("partial", "")
-            else obj.optString("text", "")
-        } catch (_: Exception) { "" }
-    }
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        dbg("onStartCommand")
         startForegroundCompat()
         isRunning = true
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        dbg("onDestroy")
+        InternalDebug.mark("Service: onDestroy")
+        try { core.stop() } catch (_: Exception) {}
         try { voskEngine.shutdown() } catch (_: Exception) {}
         try { ttsManager.shutdown() } catch (_: Exception) {}
         isRunning = false
@@ -118,15 +79,12 @@ class VocaliaService : Service() {
                 CHANNEL_ID,
                 getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = getString(R.string.notification_channel_description)
-            }
+            ).apply { description = getString(R.string.notification_channel_description) }
             nm.createNotificationChannel(channel)
         }
 
         val contentIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
+            this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
