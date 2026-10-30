@@ -40,6 +40,20 @@ class VocaliaCore(
             "siguiente", "avanza", "siguiente elemento", "el siguiente",
             "anterior", "retrocede", "anterior elemento", "el anterior",
             "lee", "leer", "lee elemento", "leer elemento", "léelo", "leelo",
+            "lee todo", "leer todo", "lee toda la interfaz", "leer toda la interfaz",
+            "lee la interfaz", "lee toda la pantalla", "lee la pantalla",
+            "ayuda", "modo usar ayuda", "ayuda del modo usar", "ayuda modo usar",
+            "busca", "buscar", "busca elemento", "busca elemento con texto",
+            "busca elemento con", "busca el elemento", "busca el texto", "busca texto",
+            "elemento", "con", "texto", "el", "y",
+            "un", "uno", "una", "dos", "tres", "cuatro", "cinco", "seis", "siete",
+            "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince",
+            "dieciséis", "diecisiete", "dieciocho", "diecinueve", "veinte",
+            "veintiuno", "veintidós", "veintitrés", "veinticuatro", "veinticinco",
+            "veintiséis", "veintisiete", "veintiocho", "veintinueve",
+            "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta",
+            "noventa", "cien", "ciento", "activa", "activar", "arrastra",
+            "arriba", "abajo", "izquierda", "derecha",
             "detalle", "detalles", "describe", "describelo", "descríbelo",
             "más detalle", "mas detalle", "más información", "mas informacion",
             "más información del elemento", "mas informacion del elemento",
@@ -78,7 +92,26 @@ class VocaliaCore(
             "Para navegar por la pantalla: di vocalia, modo usar. " +
             "Y dentro de él: siguiente, anterior, lee elemento, detalle, pulsa, atrás, " +
             "arrastra arriba, arrastra abajo, arrastra izquierda, arrastra derecha, " +
-            "portapapeles pegar. Sal con vocalia, sal del modo usar."
+            "portapapeles pegar. Sal con vocalia, sal del modo usar. " +
+            "Para ayuda detallada del modo usar: di vocalia, modo usar ayuda."
+
+        private const val UI_HELP_TEXT =
+            "Ayuda del modo usar. " +
+            "Para entrar di vocalia, modo usar. Dentro, cada comando empieza por vocalia, " +
+            "salvo que tengas activada la escucha continua. " +
+            "Para moverte de uno en uno: siguiente, anterior. " +
+            "Para oír el elemento actual: lee. Para más información de él: detalle. " +
+            "Para pulsarlo: pulsa. Para volver: atrás. " +
+            "Para desplazar: arrastra arriba, arrastra abajo, arrastra izquierda o arrastra derecha. " +
+            "Para oír toda la pantalla con números: lee todo. " +
+            "Después puedes usar los números: elemento cuatro, pulsa. " +
+            "Elemento dos, lee. Elemento tres, arrastra derecha. Elemento cinco, detalle. " +
+            "Los números se mantienen hasta que digas otra vez lee todo. " +
+            "Para buscar por nombre: busca elemento con texto, y la palabra, por ejemplo ajustes. " +
+            "Te diré el número y podrás pulsarlo. " +
+            "Para pegar: portapapeles pegar. " +
+            "Para salir: vocalia, sal del modo usar. " +
+            "Para detenerme mientras hablo: vocalia, para."
     }
 
     private var state = State.IDLE
@@ -94,6 +127,23 @@ class VocaliaCore(
 
     /** true mientras la escucha continua esté activada (también dentro del modo usar). */
     private var continuousEnabled = false
+
+    /** Palabras de los elementos en pantalla, añadidas en caliente a la gramática del modo usar. */
+    private var dynamicUiWords: List<String> = emptyList()
+
+    /** Gramática del modo usar = base + palabras registradas en caliente. */
+    private fun buildUiGrammar(): String {
+        if (dynamicUiWords.isEmpty()) return GRAMMAR_UI_NAVIGATION
+        val extra = dynamicUiWords.joinToString(", ", postfix = ", ") { "\"$it\"" }
+        return GRAMMAR_UI_NAVIGATION.replace("\"[unk]\"", extra + "\"[unk]\"")
+    }
+
+    private fun startUiListening() {
+        voskEngine.stopListening()
+        voskEngine.setGrammar(buildUiGrammar())
+        voskEngine.startListening()
+        log("UI_NAVIGATION: escuchando (${dynamicUiWords.size} palabras en caliente)")
+    }
 
     /** Instante hasta el que se acepta un comando sin wake word tras decir solo "vocalia" en modo usar. */
     private var uiWakeArmedUntil = 0L
@@ -190,19 +240,23 @@ class VocaliaCore(
         isBlockingHelp = false
         uiWakeArmedUntil = 0L
         cancelTimeouts()
-        voskEngine.stopListening()
-        voskEngine.setGrammar(GRAMMAR_UI_NAVIGATION)
-        voskEngine.startListening()
 
         if (refreshList) {
+            // Primero se refresca la lista (y se recogen las palabras de la pantalla)
+            // y después se pone la gramática, para que ya incluya esas palabras.
             mainHandler.post {
                 try {
-                    VocaliaAccessibilityService.instance?.refreshNodeList()
-                    log("UI_NAVIGATION: lista de nodos refrescada")
+                    val svc = VocaliaAccessibilityService.instance
+                    svc?.refreshNodeList()
+                    dynamicUiWords = svc?.getVocabulary() ?: emptyList()
+                    log("UI_NAVIGATION: lista refrescada, ${dynamicUiWords.size} palabras")
                 } catch (t: Throwable) {
                     log("UI_NAVIGATION: refresh THREW ${t.javaClass.simpleName}: ${t.message}")
                 }
+                if (state == State.UI_NAVIGATION) startUiListening()
             }
+        } else {
+            startUiListening()
         }
 
         uiTimeoutRunnable = Runnable {
@@ -505,8 +559,14 @@ class VocaliaCore(
                 }
             }
             CommandResult.Help -> {
-                log("Help solicitado (bloqueante, Vosk detenido)")
-                speakBlocking(HELP_TEXT) { afterExecution() }
+                log("Help solicitado (bloqueante, Vosk detenido) returnTo=$returnTo")
+                speakBlocking(if (returnTo == State.UI_NAVIGATION) UI_HELP_TEXT else HELP_TEXT) {
+                    afterExecution()
+                }
+            }
+            CommandResult.UiHelp -> {
+                log("UiHelp solicitado")
+                speakBlocking(UI_HELP_TEXT) { afterExecution() }
             }
             CommandResult.ListApps -> {
                 val all = appLauncher.getAllAppsForTTS()
@@ -608,6 +668,34 @@ class VocaliaCore(
             CommandResult.UiPrevious -> a11yCommand { it.previousNode() }
             CommandResult.UiRead     -> a11yCommand { it.readCurrentNode() }
             CommandResult.UiDetail   -> a11yCommand { it.describeCurrentNodeDetailed() }
+            CommandResult.UiReadAll  -> a11yCommand {
+                val msg = it.readAllElements()
+                dynamicUiWords = it.getVocabulary()
+                msg
+            }
+            is CommandResult.UiSearch -> a11yCommand {
+                val msg = it.searchElements(parsed.query)
+                dynamicUiWords = it.getVocabulary()
+                msg
+            }
+            is CommandResult.UiOnElement -> {
+                val act = parsed.action
+                val needsRefresh = act is CommandResult.UiClick || act is CommandResult.UiScroll
+                a11yCommand(refreshAfter = needsRefresh) { svc ->
+                    svc.selectNumbered(parsed.number)?.let { return@a11yCommand it }
+                    when (act) {
+                        is CommandResult.UiClick  -> svc.clickCurrentNode()
+                        is CommandResult.UiDetail -> svc.describeCurrentNodeDetailed()
+                        is CommandResult.UiScroll -> svc.scroll(when (act.direction) {
+                            CommandResult.UiDirection.UP    -> VocaliaAccessibilityService.ScrollDirection.UP
+                            CommandResult.UiDirection.DOWN  -> VocaliaAccessibilityService.ScrollDirection.DOWN
+                            CommandResult.UiDirection.LEFT  -> VocaliaAccessibilityService.ScrollDirection.LEFT
+                            CommandResult.UiDirection.RIGHT -> VocaliaAccessibilityService.ScrollDirection.RIGHT
+                        })
+                        else -> svc.readCurrentNode()
+                    }
+                }
+            }
             CommandResult.UiClick    -> a11yCommand(refreshAfter = true) { it.clickCurrentNode() }
             CommandResult.UiBack     -> a11yCommand(refreshAfter = true) { it.performBack() }
             CommandResult.UiPaste    -> a11yCommand { it.pasteClipboard() }

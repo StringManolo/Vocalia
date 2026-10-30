@@ -26,6 +26,11 @@ sealed class CommandResult {
     object UiPrevious : CommandResult()
     object UiRead : CommandResult()
     object UiDetail : CommandResult()
+    object UiReadAll : CommandResult()
+    object UiHelp : CommandResult()
+    data class UiSearch(val query: String) : CommandResult()
+    /** Acción sobre un elemento por su número: "elemento 4, pulsa". [action] es UiRead/UiClick/UiDetail/UiScroll. */
+    data class UiOnElement(val number: Int, val action: CommandResult) : CommandResult()
     object UiClick : CommandResult()
     object UiBack : CommandResult()
     object UiPaste : CommandResult()
@@ -49,9 +54,101 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         "matar la app ", "matar el ", "matar la ", "matar "
     )
 
+    private val searchPrefixes = listOf(
+        "busca elemento con el texto ", "busca elemento con texto ", "busca elemento con ",
+        "busca el elemento con texto ", "busca el elemento con ", "busca el elemento ",
+        "busca elemento ", "buscar elemento con texto ", "buscar elemento con ",
+        "buscar elemento ", "busca el texto ", "busca texto "
+    )
+
+    private val unitWords = mapOf(
+        "un" to 1, "uno" to 1, "una" to 1, "dos" to 2, "tres" to 3, "cuatro" to 4,
+        "cinco" to 5, "seis" to 6, "siete" to 7, "ocho" to 8, "nueve" to 9, "diez" to 10,
+        "once" to 11, "doce" to 12, "trece" to 13, "catorce" to 14, "quince" to 15,
+        "dieciséis" to 16, "dieciseis" to 16, "diecisiete" to 17, "dieciocho" to 18,
+        "diecinueve" to 19, "veinte" to 20, "veintiuno" to 21, "veintiún" to 21,
+        "veintiun" to 21, "veintiuna" to 21, "veintidós" to 22, "veintidos" to 22,
+        "veintitrés" to 23, "veintitres" to 23, "veinticuatro" to 24, "veinticinco" to 25,
+        "veintiséis" to 26, "veintiseis" to 26, "veintisiete" to 27, "veintiocho" to 28,
+        "veintinueve" to 29
+    )
+    private val tensWords = mapOf(
+        "treinta" to 30, "cuarenta" to 40, "cincuenta" to 50, "sesenta" to 60,
+        "setenta" to 70, "ochenta" to 80, "noventa" to 90
+    )
+
+    /**
+     * Lee un número en español (o en cifras) desde tokens[start]. Devuelve
+     * (valor, nº de tokens consumidos) o null si no hay número.
+     */
+    private fun parseSpanishNumber(tokens: List<String>, start: Int): Pair<Int, Int>? {
+        var i = start
+        if (i >= tokens.size) return null
+        tokens[i].toIntOrNull()?.let { return it to 1 }
+        var total = 0
+        var any = false
+        if (tokens[i] == "cien" || tokens[i] == "ciento") { total = 100; i++; any = true }
+        if (i < tokens.size && tokens[i] in tensWords) {
+            total += tensWords.getValue(tokens[i]); i++; any = true
+            if (i + 1 < tokens.size && tokens[i] == "y" && tokens[i + 1] in unitWords) {
+                total += unitWords.getValue(tokens[i + 1]); i += 2
+            }
+        } else if (i < tokens.size && tokens[i] in unitWords) {
+            total += unitWords.getValue(tokens[i]); i++; any = true
+        }
+        return if (any) total to (i - start) else null
+    }
+
+    /**
+     * "elemento cuatro pulsa", "pulsa elemento 4", "lee elemento 4",
+     * "elemento 3 arrastra derecha", "elemento dos" (= leerlo).
+     */
+    private fun parseNumberedElement(text: String): CommandResult? {
+        val tokens = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val idx = tokens.indexOf("elemento")
+        if (idx < 0) return null
+        val (value, used) = parseSpanishNumber(tokens, idx + 1) ?: return null
+        if (value <= 0) return null
+        val rest = (tokens.subList(0, idx) + tokens.subList(idx + 1 + used, tokens.size))
+            .joinToString(" ").trim()
+        val action: CommandResult = when {
+            rest.isBlank() -> CommandResult.UiRead
+            rest == "activa" || rest == "activar" -> CommandResult.UiClick
+            else -> parse(rest).takeIf {
+                it is CommandResult.UiRead || it is CommandResult.UiClick ||
+                it is CommandResult.UiDetail || it is CommandResult.UiScroll
+            } ?: return null
+        }
+        return CommandResult.UiOnElement(value, action)
+    }
+
     fun parse(raw: String): CommandResult {
         val text = raw.lowercase(esLocale).trim()
         if (text.isBlank()) return CommandResult.Response("no te he entendido")
+
+        // ============================================================
+        // Modo usar: ayuda, leer todo, búsqueda y elementos numerados
+        // (van antes que "modo usar" y que el resto para tener prioridad)
+        // ============================================================
+        if (matches(text,
+                "modo usar ayuda", "ayuda modo usar", "ayuda del modo usar",
+                "ayuda de modo usar", "ayuda de usar", "ayuda usar")) {
+            return CommandResult.UiHelp
+        }
+        if (matches(text,
+                "lee todo", "leer todo", "lee toda la interfaz", "leer toda la interfaz",
+                "lee la interfaz", "leer la interfaz", "lee toda la pantalla",
+                "lee la pantalla", "leer la pantalla", "lee todos los elementos")) {
+            return CommandResult.UiReadAll
+        }
+        for (prefix in searchPrefixes) {
+            if (text.startsWith(prefix)) {
+                val q = text.removePrefix(prefix).trim()
+                return if (q.isEmpty()) CommandResult.Response("¿qué elemento busco?")
+                       else CommandResult.UiSearch(q)
+            }
+        }
+        parseNumberedElement(text)?.let { return it }
 
         // ============================================================
         // Modo usar (UI navigation) — entrada / salida

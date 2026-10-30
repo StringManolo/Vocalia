@@ -297,11 +297,11 @@ class TtsManager(private val context: Context) {
         val clean = text.trim()
         if (clean.isEmpty()) return emptyList()
 
-        // 1) Frases terminadas en . ! ? (se comen los espacios)
-        val sentences = Regex("[^.!?]+[.!?]+").findAll(clean)
-            .map { it.value.trim() }
-            .filter { it.isNotEmpty() }
-            .toList()
+        // 1) Frases terminadas en . ! ? seguido de espacio o fin de texto.
+        //    El resto final (sin puntuación) también cuenta como frase: la versión
+        //    anterior lo descartaba y el TTS se cortaba. Un punto dentro de una
+        //    palabra (v1.2, a.b) ya no parte la frase.
+        val sentences = splitSentences(clean)
 
         val base: List<String> = if (sentences.isEmpty()) listOf(clean) else sentences
 
@@ -339,6 +339,24 @@ class TtsManager(private val context: Context) {
         }
         flush()
         return out.ifEmpty { listOf(clean) }
+    }
+
+    private fun splitSentences(text: String): List<String> {
+        val out = mutableListOf<String>()
+        val sb = StringBuilder()
+        for (i in text.indices) {
+            val c = text[i]
+            sb.append(c)
+            if (c == '.' || c == '!' || c == '?') {
+                val next = text.getOrNull(i + 1)
+                if (next == null || next.isWhitespace()) {
+                    out.add(sb.toString().trim())
+                    sb.clear()
+                }
+            }
+        }
+        if (sb.isNotBlank()) out.add(sb.toString().trim())
+        return out.filter { it.isNotEmpty() }
     }
 
     private fun lastSplit(s: String, limit: Int): Int {

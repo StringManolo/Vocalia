@@ -21,6 +21,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     companion object {
         private const val MAX_NODES = 120
+        private const val MAX_VOCAB = 150
 
         @Volatile
         var instance: VocaliaAccessibilityService? = null
@@ -68,7 +69,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
     // ----------------------------------------------------------------
 
     /**
-     * Recorre el árbol de la ventana activa (BFS) y construye una lista con
+     * Recorre el árbol de la ventana activa (en profundidad) y construye una lista con
      * los nodos visibles que son interactuables o contienen texto.
      *
      * Los nodos que son solo texto y cuelgan de un contenedor pulsable se omiten:
@@ -85,12 +86,16 @@ class VocaliaAccessibilityService : AccessibilityService() {
             return
         }
         val result = mutableListOf<AccessibilityNodeInfo>()
+        // Recorrido en profundidad (preorden): sigue el orden de lectura visual,
+        // a diferencia de BFS, que mezclaba niveles del árbol.
         // (nodo, ¿tiene un ancestro pulsable?)
-        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Boolean>>()
-        queue.add(root to false)
+        val stack = ArrayDeque<Pair<AccessibilityNodeInfo, Boolean>>()
+        stack.addLast(root to false)
+        truncated = false
 
-        while (queue.isNotEmpty() && result.size < MAX_NODES) {
-            val (node, underClickable) = queue.removeFirst()
+        while (stack.isNotEmpty()) {
+            if (result.size >= MAX_NODES) { truncated = true; break }
+            val (node, underClickable) = stack.removeLast()
             if (!node.isVisibleToUser) continue
 
             val hasText = !node.text.isNullOrBlank() ||
@@ -101,8 +106,8 @@ class VocaliaAccessibilityService : AccessibilityService() {
                 result.add(node)
             }
             val childFlag = underClickable || node.isClickable
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it to childFlag) }
+            for (i in node.childCount - 1 downTo 0) {
+                node.getChild(i)?.let { stack.addLast(it to childFlag) }
             }
         }
 
@@ -112,8 +117,136 @@ class VocaliaAccessibilityService : AccessibilityService() {
             preserveIndex && previousIndex >= 0 -> previousIndex.coerceAtMost(result.size - 1)
             else -> 0
         }
+        rebuildVocabulary()
         dbg("refreshNodeList: ${result.size} nodos, index=$currentIndex")
     }
+
+    // ----------------------------------------------------------------
+    // Numeración de elementos ("lee todo") y búsqueda
+    // ----------------------------------------------------------------
+
+    /**
+     * Palabras de los nombres de los elementos en pantalla. Core las añade en
+     * caliente a la gramática de Vosk para poder buscar por nombre.
+     */
+    @Volatile private var vocabulary: List<String> = emptyList()
+    fun getVocabulary(): List<String> = vocabulary
+
+    private val WORD_REGEX = Regex("^[a-záéíóúüñ]{2,20}$")
+
+    private fun rebuildVocabulary() {
+        val words = LinkedHashSet<String>()
+        val sources = interactiveNodes + numbered
+        for (n in sources) {
+            val name = try { accessibleName(n).first } catch (_: Throwable) { null } ?: continue
+            for (w in name.lowercase().split(Regex("[^\\p{L}0-9]+"))) {
+                if (WORD_REGEX.matches(w)) words.add(w)
+                if (words.size >= MAX_VOCAB) break
+            }
+            if (words.size >= MAX_VOCAB) break
+        }
+        vocabulary = words.toList()
+    }
+
+    /** Instantánea numerada: elemento N = numbered[N-1]. Solo cambia con "lee todo" / búsqueda. */
+    private var numbered: List<AccessibilityNodeInfo> = emptyList()
+    private var truncated = false
+
+    private fun buildNumbering() {
+        refreshNodeList()
+        numbered = interactiveNodes.toList()
+        rebuildVocabulary()
+        dbg("buildNumbering: ${numbered.size} elementos numerados")
+    }
+
+    /** Descripción para listas: "<tipo> <n>: <nombre>, <estado>". */
+    private fun describeNumbered(node: AccessibilityNodeInfo, n: Int): String {
+        val role = roleOf(node)
+        if (node.isEditable && node.isPassword) return "campo de contraseña $n"
+        val (rawName, weak) = accessibleName(node)
+        val name = rawName?.let { SpeechText.speakable(it, 80) }
+        val parts = mutableListOf<String>()
+        when {
+            name == null -> parts.add("sin nombre")
+            weak -> parts.add("sin etiqueta, $name")
+            else -> parts.add(name)
+        }
+        if (node.isEditable) {
+            val content = node.text.clean()
+            if (content != null && content != hintOf(node)) parts.add("contiene ${SpeechText.speakable(content, 80)}")
+            else parts.add("vacío")
+        }
+        parts.addAll(stateOf(node))
+        return "$role $n: ${parts.joinToString(", ")}"
+    }
+
+    /** "lee todo": numera la interfaz y la lee entera. */
+    fun readAllElements(): String {
+        buildNumbering()
+        if (numbered.isEmpty()) return "no hay elementos en pantalla"
+        val sb = StringBuilder()
+        sb.append("La interfaz tiene ${numbered.size} elementos")
+        if (truncated) sb.append(", mostrando solo los primeros $MAX_NODES")
+        sb.append(". ")
+        numbered.forEachIndexed { i, n -> sb.append(describeNumbered(n, i + 1)).append(". ") }
+        dbg("readAll -> ${numbered.size} elementos")
+        return sb.toString().trim()
+    }
+
+    /**
+     * Selecciona el elemento número [n] (de la última numeración). Devuelve un
+     * mensaje de error, o null si quedó seleccionado.
+     */
+    fun selectNumbered(n: Int): String? {
+        if (numbered.isEmpty()) return "no hay números asignados, di lee todo"
+        if (n !in 1..numbered.size) return "no existe el elemento $n, hay ${numbered.size}"
+        val node = numbered[n - 1]
+        if (!node.refresh()) return "el elemento $n ya no está disponible, di lee todo para renumerar"
+        val idx = interactiveNodes.indexOf(node)
+        if (idx >= 0) {
+            currentIndex = idx
+        } else {
+            interactiveNodes = numbered
+            currentIndex = n - 1
+        }
+        dbg("selectNumbered($n) -> index=$currentIndex")
+        return null
+    }
+
+    /** Número del nodo en la numeración vigente, o 0 si no está. */
+    private fun numberOf(node: AccessibilityNodeInfo): Int = numbered.indexOf(node) + 1
+
+    /**
+     * "busca elemento con texto X": busca en la pantalla actual (renumerando,
+     * lo que no cambia nada si la pantalla es la misma), selecciona la primera
+     * coincidencia y dice su número.
+     */
+    fun searchElements(query: String): String {
+        buildNumbering()
+        val words = SpeechText.normalize(query).split(' ').filter { it.isNotEmpty() }
+        if (words.isEmpty()) return "no he entendido qué buscar"
+        if (numbered.isEmpty()) return "no hay elementos en pantalla"
+
+        val matches = numbered.withIndex().filter { (_, node) ->
+            val hay = SpeechText.normalize(searchableText(node))
+            words.all { hay.contains(it) }
+        }.map { it.index }
+
+        if (matches.isEmpty()) return "no he encontrado ningún elemento con ${words.joinToString(" ")}"
+        selectNumbered(matches[0] + 1)
+        val first = describeNumbered(numbered[matches[0]], matches[0] + 1)
+        return if (matches.size == 1) first
+        else "${matches.size} coincidencias. $first. También: elementos " +
+             matches.drop(1).take(5).joinToString(", ") { (it + 1).toString() }
+    }
+
+    private fun searchableText(node: AccessibilityNodeInfo): String =
+        listOfNotNull(
+            accessibleName(node).first,
+            node.text.clean(),
+            node.contentDescription.clean(),
+            idToWords(node.viewIdResourceName)
+        ).joinToString(" ")
 
     private fun getCurrentNode(): AccessibilityNodeInfo? =
         if (currentIndex in interactiveNodes.indices) interactiveNodes[currentIndex] else null
@@ -214,7 +347,8 @@ class VocaliaAccessibilityService : AccessibilityService() {
      * lo dice explícitamente en vez de limitarse a "botón".
      */
     private fun describeNode(node: AccessibilityNodeInfo): String {
-        val (name, weak) = accessibleName(node)
+        val (rawName, weak) = accessibleName(node)
+        val name = rawName?.let { SpeechText.speakable(it, 100) }
         val role = roleOf(node)
 
         if (node.isEditable && node.isPassword) {
@@ -228,7 +362,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
         if (node.isEditable) {
             val content = node.text.clean()
             // Si el texto coincide con la pista, el campo está realmente vacío
-            if (content != null && content != hintOf(node)) parts.add("contiene: $content")
+            if (content != null && content != hintOf(node)) parts.add("contiene: ${SpeechText.speakable(content, 140)}")
             else parts.add("vacío")
         }
 
@@ -262,6 +396,8 @@ class VocaliaAccessibilityService : AccessibilityService() {
         val vert  = when { r.centerY() < dm.heightPixels / 3 -> "arriba"; r.centerY() > dm.heightPixels * 2 / 3 -> "abajo"; else -> "en medio" }
         sb.append(". posición: $vert $horiz")
         sb.append(". elemento ${currentIndex + 1} de ${interactiveNodes.size}")
+        val num = numberOf(node)
+        if (num > 0) sb.append(". número $num")
         idToWords(node.viewIdResourceName)?.let { sb.append(". identificador: $it") }
         dbg("detail [$currentIndex] -> $sb")
         return sb.toString()
@@ -277,7 +413,9 @@ class VocaliaAccessibilityService : AccessibilityService() {
             return "no hay elementos. Prueba a decir siguiente o anterior."
         }
         val node = getCurrentNode() ?: return "no hay elemento seleccionado"
-        val desc = describeNode(node)
+        var desc = describeNode(node)
+        val n = numberOf(node)
+        if (n > 0) desc += ". elemento $n"
         dbg("read [$currentIndex/${interactiveNodes.size - 1}] -> \"$desc\"")
         return desc
     }

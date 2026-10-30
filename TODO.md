@@ -26,6 +26,9 @@ Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
 3 Sistema de dictado (te relee lo que llevar escrito y demás. Básicamente es como vi/vim pero interno por voz, y una vez confirmado te permite usar el texto por etiquetas). Por ejemplo: Pega el texto1. Pega el Texto2. Lee el texto2. Borra el texto2. Edita el Texto1. ...
 
 #### general
+- Necesita feedback por TTS de cuando entra al modo USAR (entra y va, pero el usuario no lo sabe)
+
+- Diseñar iconos de la app, pagina web, y demás
 
 - Abrir automáticmanete la config del servicio de accesibilidad / pedirlo programáticamente
 
