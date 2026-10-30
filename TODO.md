@@ -9,6 +9,9 @@ Reorganizar por Quality of Life, seguridad, Core, etc
 ##### Vulnerabilidades Conocidas
 - Audios en speaker pueden atacar a la app. Por ejemplo si te mandan un audio por Telegram, pueden instruir a Vocalia que hacer. (necesario pensar en solución robusta que no tenga workarounds sin limitar la app)
 
+### Fixes
+- Se necesita evaluar / reparar la pausa y continuar del TTS. Sigue sin funcionar como se espera.
+
 ### Fase siguiente
 Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
 
