@@ -23,6 +23,7 @@ class TtsManager(private val context: Context) {
     @Volatile private var paused = false
     @Volatile private var stopped = false
     @Volatile private var speakThread: Thread? = null
+    @Volatile private var currentChunkText: String? = null
 
     private fun dbg(msg: String) { InternalDebug.mark("[${Thread.currentThread().name}] TtsManager: $msg") }
 
@@ -117,6 +118,7 @@ class TtsManager(private val context: Context) {
                         dbg("speak: reanudado en chunk $idx")
                     }
 
+                    currentChunkText = chunk
                     if (!started) { started = true; onStart?.invoke() }
 
                     val latch = CountDownLatch(1)
@@ -127,6 +129,7 @@ class TtsManager(private val context: Context) {
             } catch (t: Throwable) {
                 dbg("speak: THREW ${t.javaClass.simpleName}: ${t.message}")
             } finally {
+                currentChunkText = null
                 speaking = false
                 paused = false
                 stopped = false
@@ -151,17 +154,22 @@ class TtsManager(private val context: Context) {
 
     fun isSpeaking(): Boolean = speaking
     fun isPaused(): Boolean = paused
+    fun getCurrentChunkText(): String? = currentChunkText
 
     fun stop() {
         dbg("stop")
         stopped = true
         paused = false
         currentEngine?.stop()
+        // Síncrono: esperar a que el speak thread muera (máx 2 s)
+        try { speakThread?.join(2000) } catch (_: InterruptedException) {}
+        currentChunkText = null
     }
 
     fun shutdown() {
         dbg("shutdown")
         stopped = true
+        try { speakThread?.join(2000) } catch (_: InterruptedException) {}
         try { espeakEngine?.shutdown() } catch (_: Throwable) {}
         try { sherpaEngine?.shutdown() } catch (_: Throwable) {}
         currentEngine = null

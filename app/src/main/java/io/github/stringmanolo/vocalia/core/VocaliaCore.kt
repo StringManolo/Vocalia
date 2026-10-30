@@ -30,20 +30,22 @@ class VocaliaCore(
 
         private const val HELP_TEXT =
             "Puedo hacer muchas cosas. Te las resumo por categorías. " +
-            "Para abrir una app: di, asistente, abre, seguido del nombre, o simplemente asistente y el nombre de la app. " +
-            "Para cerrar una app: asistente, cierra, seguido del nombre. O asistente, cierra esta app. " +
-            "Para saber la hora: asistente, qué hora es. " +
-            "Para saber la fecha: asistente, qué día es. " +
-            "Para cambiar a voz natural: asistente, usa voz inteligente. " +
-            "Para volver a voz robótica: asistente, usa voz por defecto. " +
-            "Para activar el modo escucha continua: asistente, escucha continua. " +
-            "Para desactivarlo: asistente, descansa. " +
-            "Para listar tus apps: asistente, lista de apps. " +
-            "Para que te lea todas las apps: asistente, lístame las apps. " +
-            "Para pausar una lectura: asistente, para, o asistente, pausa. " +
-            "Para reanudar una lectura: asistente, continúa. " +
-            "Para saludarme: asistente, hola, o asistente, cómo estás. " +
-            "Y para escuchar esto otra vez: asistente, ayuda."
+            "Para abrir una app, di abre seguido del nombre. " +
+            "Para cerrar una app, di cierra seguido del nombre. " +
+            "Para traer una app al frente, di cierra esta app. " +
+            "Para saber la hora, di qué hora es. " +
+            "Para la fecha, di qué día es. " +
+            "Para cambiar a voz natural, di usa voz inteligente. " +
+            "Para volver a voz robótica, di usa voz por defecto. " +
+            "Para activar el modo escucha continua, di escucha continua. " +
+            "Para desactivarlo, di descansa. " +
+            "Para listar tus apps, di lista de apps. " +
+            "Para que te lea todas las apps, di lístame las apps. " +
+            "Para detener una lectura en curso, di la palabra stop. " +
+            "Para reanudarla, di continúa. " +
+            "Para saludarme, di hola. " +
+            "Para escuchar esto otra vez, di ayuda. " +
+            "Recuerda decir la palabra asistente antes de cada orden."
     }
 
     private var state = State.IDLE
@@ -227,9 +229,18 @@ class VocaliaCore(
                 val words = cleanText.split("\\s+".toRegex()).filter { it.isNotBlank() }
                 val isPause = hasWake && words.any { it in pauseWords }
                 if (isPause) {
-                    log("TTS_SPEAKING: pausa detectada en \"$text\"")
-                    ttsManager.pause()
-                    enterTtsPaused()
+                    // Comprobar si el chunk actual del TTS contiene las palabras → probable eco
+                    val chunk = ttsManager.getCurrentChunkText() ?: ""
+                    val chunkLower = chunk.lowercase()
+                    val chunkHasTrigger = chunkLower.contains("asistente") ||
+                            pauseWords.any { chunkLower.contains(it) }
+                    if (chunkHasTrigger) {
+                        log("TTS_SPEAKING: pausa ignorada (posible eco del TTS, chunk contiene trigger)")
+                    } else {
+                        log("TTS_SPEAKING: pausa detectada en \"$text\"")
+                        ttsManager.pause()
+                        enterTtsPaused()
+                    }
                 } else {
                     log("TTS_SPEAKING: comando no permitido, ignorando (hasWake=$hasWake)")
                 }
@@ -255,8 +266,9 @@ class VocaliaCore(
                         speakAndReturn("descanso") { enterIdle() }
                     }
                     else -> {
-                        log("TTS_PAUSED: comando normal, se ejecuta y vuelve a pausa")
-                        handleCommand(command, State.TTS_PAUSED)
+                        log("TTS_PAUSED: comando nuevo, se abandona la lectura pausada")
+                        ttsManager.stop()
+                        handleCommand(command, State.IDLE)
                     }
                 }
             }
@@ -266,6 +278,11 @@ class VocaliaCore(
 
     private fun handleCommand(text: String, returnTo: State) {
         log("handleCommand: \"$text\" returnTo=$returnTo")
+        // Si hay TTS en curso (p.ej. venimos de TTS_PAUSED con otro comando), pararlo primero
+        if (ttsManager.isSpeaking()) {
+            log("handleCommand: cancelando TTS en curso")
+            ttsManager.stop()
+        }
         val parsed = commandParser.parse(text)
         val forceIdle = parsed is CommandResult.Sleep || parsed is CommandResult.ExitContinuous
         enterExecuting(if (forceIdle) State.IDLE else returnTo)
@@ -324,7 +341,7 @@ class VocaliaCore(
             is CommandResult.OpenApp -> {
                 val r = appLauncher.launch(parsed.appName)
                 val message = when (r) {
-                    is AppLauncher.Result.Ok -> "abriendo ${parsed.appName}"
+                    is AppLauncher.Result.Ok -> "abriendo ${r.appName}"
                     is AppLauncher.Result.NotFound -> "no encuentro la app ${parsed.appName}"
                     is AppLauncher.Result.Error -> "no pude abrir ${parsed.appName}"
                 }
@@ -341,7 +358,7 @@ class VocaliaCore(
                     mainHandler.postDelayed({
                         val r = appLauncher.closeApp(parsed.appName)
                         val message = when (r) {
-                            is AppLauncher.Result.Ok -> "cerrando ${parsed.appName}"
+                            is AppLauncher.Result.Ok -> "cerrando ${r.appName}"
                             is AppLauncher.Result.NotFound -> "no encuentro la app ${parsed.appName}"
                             is AppLauncher.Result.Error -> "no pude cerrar ${parsed.appName}"
                         }
