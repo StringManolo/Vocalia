@@ -24,11 +24,13 @@ class EspeakNgEngine(context: Context) : TtsEngine {
 
     override val name = "EspeakNg"
     override var onComplete: (() -> Unit)? = null
+    @Volatile private var paused = false
 
     companion object {
         private const val TAG = "EspeakNgEngine"
         private const val TTS_LANGUAGE = "es"
         private const val TTS_VARIANT = "female"
+        private const val WRITE_CHUNK = 4096
 
         private val initLock = Any()
         @Volatile private var sharedSynth: SpeechSynthesis? = null
@@ -52,9 +54,8 @@ class EspeakNgEngine(context: Context) : TtsEngine {
     private val generation = AtomicInteger(0)
     @Volatile private var synthGeneration = 0
     private var focusRequest: AudioFocusRequest? = null
-
-    // Buffer donde onPcm acumula el PCM durante synthesize()
     @Volatile private var pcmBuffer: ByteArrayOutputStream? = null
+    @Volatile private var currentTrack: AudioTrack? = null
 
     override fun init(onReady: () -> Unit, onError: (String) -> Unit) {
         Thread({ initWorker(onReady, onError) }, "espeak-init").start()
@@ -66,9 +67,7 @@ class EspeakNgEngine(context: Context) : TtsEngine {
             val s = obtainSharedSynth()
 
             if (s.sampleRate <= 0) {
-                mainHandler.post {
-                    onError("SpeechSynthesis no se inicializó (sampleRate=0)")
-                }
+                mainHandler.post { onError("SpeechSynthesis no se inicializó (sampleRate=0)") }
                 return
             }
 
@@ -191,17 +190,12 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         }
     }
 
-    /** Llamado por el callback nativo durante synthesize(). Solo acumula. */
     private fun onPcm(pcm: ByteArray) {
         if (shuttingDown) return
         if (synthGeneration != generation.get()) return
         pcmBuffer?.write(pcm)
     }
 
-    /**
-     * Reproduce el PCM acumulado. Se llama desde speak() DESPUÉS de synthesize().
-     * Reproducir dentro del callback nativo hace que EMUI no conecte el AudioTrack.
-     */
     private fun playCleanly(pcm: ByteArray, gen: Int) {
         var t: AudioTrack? = null
         try {
@@ -229,9 +223,23 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 .build()
 
             if (t.state != AudioTrack.STATE_INITIALIZED) return
-
+            currentTrack = t
             t.play()
-            t.write(pcm, 0, pcm.size)
+
+            var offset = 0
+            while (offset < pcm.size) {
+                if (gen != generation.get()) break
+                if (paused) {
+                    try { t.pause() } catch (_: Throwable) {}
+                    while (paused && gen == generation.get()) Thread.sleep(50)
+                    if (gen != generation.get()) break
+                    try { t.play() } catch (_: Throwable) {}
+                }
+                val toWrite = minOf(WRITE_CHUNK, pcm.size - offset)
+                val written = t.write(pcm, offset, toWrite)
+                if (written <= 0) break
+                offset += written
+            }
 
             val frames = pcm.size / 2
             val expectedMs = frames * 1000L / rate
@@ -241,16 +249,15 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 if (t.playbackHeadPosition >= frames) break
                 Thread.sleep(40)
             }
-            Thread.sleep(100) // margen para el HAL
+            Thread.sleep(100)
         } catch (ex: Throwable) {
             Log.e(TAG, "playCleanly: ${ex.message}", ex)
         } finally {
             try { t?.stop() } catch (_: Throwable) {}
             try { t?.release() } catch (_: Throwable) {}
+            if (currentTrack === t) currentTrack = null
             abandonAudioFocus()
         }
-
-        // NUEVO: notificar al orquestador que la locución ha terminado.
         val cb = onComplete
         onComplete = null
         cb?.invoke()
@@ -283,7 +290,6 @@ class EspeakNgEngine(context: Context) : TtsEngine {
                 if (pcmBytes.isNotEmpty() && generation.get() == gen) {
                     playCleanly(pcmBytes, gen)
                 } else {
-                    // No se reprodujo nada: invocar onComplete igualmente para no bloquear.
                     val cb = onComplete
                     onComplete = null
                     cb?.invoke()
@@ -302,11 +308,15 @@ class EspeakNgEngine(context: Context) : TtsEngine {
         generation.incrementAndGet()
         try { sharedSynth?.stop() } catch (_: Throwable) {}
         abandonAudioFocus()
-        // NUEVO: desbloquear al orquestador si estaba esperando un callback.
+        paused = false
         val cb = onComplete
         onComplete = null
         cb?.invoke()
     }
+
+    override fun pause() { paused = true }
+    override fun resume() { paused = false }
+    override fun isPaused(): Boolean = paused
 
     override fun setSpeed(rate: Float) {
         try {

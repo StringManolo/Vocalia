@@ -10,4 +10,13 @@ interface TtsEngine {
 
     /** Se invoca cuando la locución actual termina o se cancela. */
     var onComplete: (() -> Unit)?
+
+    /** Pausa la reproducción en caliente. El siguiente chunk no se reproduce hasta resume(). */
+    fun pause()
+
+    /** Reanuda la reproducción tras una pausa. */
+    fun resume()
+
+    /** true si el engine está pausado. */
+    fun isPaused(): Boolean
 }

@@ -65,7 +65,7 @@ class VoskEngine(private val context: Context) {
             val recognizer = Recognizer(m, 16000.0f, currentGrammar)
             speechService = SpeechService(recognizer, 16000.0f)
             speechService?.startListening(listener)
-            Log.i(TAG, "startListening OK")
+            Log.i(TAG, "startListening OK (grammar=${currentGrammar.length} chars)")
         } catch (e: IOException) {
             Log.e(TAG, "startListening falló", e)
             onError?.invoke("Error startListening: ${e.message}")
@@ -75,6 +75,17 @@ class VoskEngine(private val context: Context) {
     fun stopListening() {
         speechService?.stop()
         speechService = null
+    }
+
+    /** Cambia la gramática activa. Si el servicio está escuchando, lo reinicia con la nueva. */
+    fun setGrammar(grammar: String) {
+        if (grammar == currentGrammar && speechService != null) return
+        currentGrammar = grammar
+        Log.i(TAG, "setGrammar (${grammar.length} chars), speechService=${speechService != null}")
+        if (speechService != null) {
+            stopListening()
+            startListening()
+        }
     }
 
     fun shutdown() {

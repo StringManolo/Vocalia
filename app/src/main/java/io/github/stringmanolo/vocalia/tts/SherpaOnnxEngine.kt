@@ -27,10 +27,12 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
         private const val ONNX_FILE = "es_ES-miro-high.onnx"
         private const val TOKENS_FILE = "tokens.txt"
         private const val ESPEAK_DATA = "espeak-ng-data"
+        private const val WRITE_CHUNK = 4096
     }
 
     override val name = "SherpaOnnx"
     @Volatile override var onComplete: (() -> Unit)? = null
+    @Volatile private var paused = false
 
     private var tts: OfflineTts? = null
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -77,13 +79,11 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
             )
 
             val t0 = System.currentTimeMillis()
-            // null = no usar AssetManager, todo por rutas absolutas
             val instance = OfflineTts(null, config)
             val dt = System.currentTimeMillis() - t0
             tts = instance
             dbg("init: OfflineTts creado en ${dt}ms")
 
-            // Smoke test: generar una palabra y comprobar que hay muestras
             try {
                 val s0 = System.currentTimeMillis()
                 val test = instance.generate("prueba", 0, 1.0f)
@@ -103,10 +103,6 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
         }
     }
 
-    /**
-     * Copia el modelo completo (onnx, tokens, espeak-ng-data) de assets a filesDir.
-     * Solo la primera vez (marker .ok). Después es instantáneo.
-     */
     private fun ensureModelOnDisk(): File {
         val outDir = File(context.filesDir, ASSET_DIR)
         val marker = File(outDir, ".ok")
@@ -126,14 +122,12 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
     private fun copyAsset(path: String, dest: File) {
         val children = context.assets.list(path)
         if (children.isNullOrEmpty()) {
-            // Fichero individual o directorio vacío
             dest.parentFile?.mkdirs()
             try {
                 context.assets.open(path).use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }
                 }
             } catch (_: java.io.FileNotFoundException) {
-                // Era un directorio vacío
                 dest.mkdirs()
             }
         } else {
@@ -191,8 +185,21 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
         try { currentTrack?.stop() } catch (_: Throwable) {}
         try { currentTrack?.release() } catch (_: Throwable) {}
         currentTrack = null
+        paused = false
         notifyComplete()
     }
+
+    override fun pause() {
+        dbg("pause()")
+        paused = true
+    }
+
+    override fun resume() {
+        dbg("resume()")
+        paused = false
+    }
+
+    override fun isPaused(): Boolean = paused
 
     override fun setSpeed(rate: Float) {
         currentSpeed = rate.coerceIn(0.5f, 2.0f)
@@ -249,8 +256,28 @@ class SherpaOnnxEngine(private val context: Context) : TtsEngine {
 
             currentTrack = track
             track.play()
-            val written = track.write(pcmBytes, 0, pcmBytes.size)
-            dbg("playAudio: write=$written/${pcmBytes.size}")
+
+            // Escritura por chunks para permitir pausa en caliente
+            var offset = 0
+            while (offset < pcmBytes.size) {
+                if (shuttingDown) break
+                if (paused) {
+                    try { track.pause() } catch (_: Throwable) {}
+                    dbg("playAudio: pausado en offset=$offset/${pcmBytes.size}")
+                    while (paused && !shuttingDown) delay(50)
+                    if (shuttingDown) break
+                    try { track.play() } catch (_: Throwable) {}
+                    dbg("playAudio: reanudado en offset=$offset")
+                }
+                val toWrite = minOf(WRITE_CHUNK, pcmBytes.size - offset)
+                val written = track.write(pcmBytes, offset, toWrite)
+                if (written <= 0) {
+                    dbg("playAudio: write=$written en offset=$offset, abortando")
+                    break
+                }
+                offset += written
+            }
+            dbg("playAudio: escrito $offset/${pcmBytes.size}")
 
             val frames = pcmBytes.size / 2
             val expectedMs = frames * 1000L / sampleRate

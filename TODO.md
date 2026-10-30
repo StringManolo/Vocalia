@@ -16,6 +16,10 @@ Cosas concretas que añadir/parchear/evaluar.
 
 - Añadir confirmación robusta (con pin opcional) para tareas sensitivas. (Modo Root, similar a como funciona SUDO y SUDO SU en Linux)
 
+- Test other voices
+
+- Grammar in 1 place (fuck spaguetti)
+
 - Abuse cache in worflow to reduce build times
 
 - Test if worth to embeed unzip on the apk to reduce apk size and decompress on runtime

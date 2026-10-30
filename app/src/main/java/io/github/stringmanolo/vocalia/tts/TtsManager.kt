@@ -2,6 +2,9 @@ package io.github.stringmanolo.vocalia.tts
 
 import android.content.Context
 import io.github.stringmanolo.vocalia.util.InternalDebug
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class TtsManager(private val context: Context) {
 
@@ -14,34 +17,30 @@ class TtsManager(private val context: Context) {
 
     private var espeakEngine: EspeakNgEngine? = null
     private var sherpaEngine: SherpaOnnxEngine? = null
-
     @Volatile private var sherpaReady = false
     @Volatile private var sherpaLoading = false
 
-    private fun dbg(msg: String) {
-        InternalDebug.mark("[${Thread.currentThread().name}] TtsManager: $msg")
-    }
+    @Volatile private var speaking = false
+    @Volatile private var paused = false
+    @Volatile private var stopped = false
+    private var speakThread: Thread? = null
+
+    private fun dbg(msg: String) { InternalDebug.mark("[${Thread.currentThread().name}] TtsManager: $msg") }
 
     fun init() {
         val espeak = EspeakNgEngine(context)
         espeakEngine = espeak
         espeak.init(
             onReady = {
-                dbg("EspeakNg listo (default)")
+                dbg("EspeakNg listo")
                 currentEngine = espeak
                 currentMode = EngineMode.ESPEAK
                 onEngineReady?.invoke(espeak)
             },
-            onError = { error ->
-                dbg("EspeakNg falló al inicializar: $error")
-            }
+            onError = { dbg("EspeakNg falló: $it") }
         )
     }
 
-    /**
-     * Cambia el motor. Asíncrono para SHERPA (devuelve antes de cargar).
-     * @param callback se invoca en un hilo cualquiera: postea al main si lo necesitas.
-     */
     fun setEngineAsync(mode: EngineMode, callback: (Boolean, String) -> Unit) {
         when (mode) {
             EngineMode.ESPEAK -> {
@@ -49,29 +48,20 @@ class TtsManager(private val context: Context) {
                 if (e != null) {
                     currentEngine = e
                     currentMode = EngineMode.ESPEAK
-                    dbg("Motor -> EspeakNg")
                     callback(true, "voz por defecto activada")
-                } else {
-                    dbg("setEngineAsync(ESPEAK) sin motor")
-                    callback(false, "espeak no disponible")
-                }
+                } else callback(false, "espeak no disponible")
             }
             EngineMode.SHERPA -> {
                 if (sherpaReady) {
                     currentEngine = sherpaEngine
                     currentMode = EngineMode.SHERPA
-                    dbg("Motor -> SherpaOnnx (ya cargado)")
                     callback(true, "voz inteligente activada")
                     return
                 }
-                if (sherpaLoading) {
-                    callback(false, "voz inteligente cargándose, espera")
-                    return
-                }
+                if (sherpaLoading) { callback(false, "voz inteligente cargándose"); return }
                 sherpaLoading = true
                 Thread({
                     try {
-                        dbg("Sherpa: carga START")
                         val sherpa = SherpaOnnxEngine(context)
                         sherpa.init(
                             onReady = {
@@ -80,11 +70,9 @@ class TtsManager(private val context: Context) {
                                 sherpaLoading = false
                                 currentEngine = sherpa
                                 currentMode = EngineMode.SHERPA
-                                dbg("Motor -> SherpaOnnx (recién cargado)")
                                 callback(true, "voz inteligente activada")
                             },
-                            onError = { err ->
-                                dbg("Sherpa: no disponible -> $err")
+                            onError = {
                                 sherpaEngine = null
                                 sherpaReady = false
                                 sherpaLoading = false
@@ -92,7 +80,6 @@ class TtsManager(private val context: Context) {
                             }
                         )
                     } catch (t: Throwable) {
-                        dbg("Sherpa: setEngineAsync THREW ${t.javaClass.simpleName}: ${t.message}")
                         sherpaEngine = null
                         sherpaReady = false
                         sherpaLoading = false
@@ -103,25 +90,77 @@ class TtsManager(private val context: Context) {
         }
     }
 
-    fun speak(text: String, onComplete: (() -> Unit)? = null) {
-        val engine = currentEngine
-        if (engine == null) {
-            dbg("speak sin motor")
+    fun speak(text: String, onStart: (() -> Unit)? = null, onComplete: (() -> Unit)? = null) {
+        if (speaking) {
+            dbg("speak: ya hablando, ignorando")
             onComplete?.invoke()
             return
         }
-        dbg("speak(\"$text\") con ${engine.name}")
-        engine.onComplete = onComplete
-        engine.speak(text)
+        val engine = currentEngine ?: run { onComplete?.invoke(); return }
+
+        speaking = true
+        paused = false
+        stopped = false
+        val chunks = splitIntoChunks(text)
+        dbg("speak: ${chunks.size} chunks, ${text.length} chars")
+
+        speakThread = Thread({
+            var started = false
+            try {
+                for ((idx, chunk) in chunks.withIndex()) {
+                    if (stopped) { dbg("speak: stop en chunk $idx"); break }
+                    if (paused) {
+                        engine.pause()
+                        dbg("speak: pausado en chunk $idx")
+                        while (paused && !stopped) Thread.sleep(100)
+                        if (stopped) break
+                        engine.resume()
+                        dbg("speak: reanudado en chunk $idx")
+                    }
+
+                    if (!started) { started = true; onStart?.invoke() }
+
+                    val latch = CountDownLatch(1)
+                    engine.onComplete = { latch.countDown() }
+                    engine.speak(chunk)
+                    latch.await(120, TimeUnit.SECONDS)
+                }
+            } catch (t: Throwable) {
+                dbg("speak: THREW ${t.javaClass.simpleName}: ${t.message}")
+            } finally {
+                speaking = false
+                paused = false
+                stopped = false
+                onComplete?.invoke()
+            }
+        }, "tts-chunk").start()
     }
 
+    fun pause() {
+        dbg("pause")
+        paused = true
+        currentEngine?.pause()
+    }
+
+    fun resume() {
+        dbg("resume")
+        paused = false
+        currentEngine?.resume()
+    }
+
+    fun isSpeaking(): Boolean = speaking
+    fun isPaused(): Boolean = paused
+
     fun stop() {
-        currentEngine?.onComplete = null
+        dbg("stop")
+        stopped = true
+        paused = false
         currentEngine?.stop()
     }
 
     fun shutdown() {
         dbg("shutdown")
+        stopped = true
         try { espeakEngine?.shutdown() } catch (_: Throwable) {}
         try { sherpaEngine?.shutdown() } catch (_: Throwable) {}
         currentEngine = null
@@ -129,5 +168,21 @@ class TtsManager(private val context: Context) {
         sherpaEngine = null
         sherpaReady = false
         sherpaLoading = false
+    }
+
+    private fun splitIntoChunks(text: String): List<String> {
+        if (text.length <= 200) return listOf(text)
+        val sentences = text.split(Regex("(?<=[.,;:!?])\\s+")).filter { it.isNotBlank() }
+        val chunks = mutableListOf<String>()
+        var buf = StringBuilder()
+        for (s in sentences) {
+            if (buf.length + s.length > 200 && buf.isNotEmpty()) {
+                chunks.add(buf.toString().trim())
+                buf = StringBuilder()
+            }
+            buf.append(s).append(' ')
+        }
+        if (buf.isNotEmpty()) chunks.add(buf.toString().trim())
+        return chunks.ifEmpty { listOf(text) }
     }
 }

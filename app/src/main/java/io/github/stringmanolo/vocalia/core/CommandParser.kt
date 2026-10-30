@@ -6,6 +6,11 @@ import java.util.Locale
 
 sealed class CommandResult {
     object Sleep : CommandResult()
+    object ListApps : CommandResult()
+    object EnterContinuous : CommandResult()
+    object ExitContinuous : CommandResult()
+    object PauseTts : CommandResult()
+    object ResumeTts : CommandResult()
     data class Response(val text: String) : CommandResult()
     data class SetVoiceMode(val intelligent: Boolean) : CommandResult()
     data class OpenApp(val appName: String) : CommandResult()
@@ -29,25 +34,34 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         return when {
             text.isBlank() -> CommandResult.Response("no te he entendido")
 
-            // 1. OpenApp PRIMERO (para evitar que "abre cámara callate" → Sleep)
+            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz", "para el tts", "para el texto", "para la lectura") ->
+                CommandResult.PauseTts
+            matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura", "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo") ->
+                CommandResult.ResumeTts
+
+            matches(text, "para escucha continua", "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo") ->
+                CommandResult.ExitContinuous
+            matches(text, "escucha continua", "modo continuo", "escucha constante") ->
+                CommandResult.EnterContinuous
+
+            matches(text, "lista de apps", "lista apps", "qué apps tengo", "que apps tengo", "lista de aplicaciones") ->
+                CommandResult.ListApps
+
             extractAppName(text) != null -> CommandResult.OpenApp(extractAppName(text)!!)
             appLauncher?.hasApp(text) == true -> CommandResult.OpenApp(text)
 
-            // 2. Sleep
-            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "para", "parar", "silencio", "callate") ->
+            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "silencio", "callate") ->
                 CommandResult.Sleep
 
-            // 3. Cambio de voz
             matches(text, "inteligente", "piper", "neuronal", "natural") ->
                 CommandResult.SetVoiceMode(intelligent = true)
-            matches(text, "por defecto", "normal", "espeak", "robotica", "robótica", "robotizada") ->
+            matches(text, "por defecto", "espeak", "robotica", "robotizada") ->
                 CommandResult.SetVoiceMode(intelligent = false)
 
-            // 4. Info
             matches(text, "hora") -> CommandResult.Response(currentTime())
-            matches(text, "fecha", "dia", "día") -> CommandResult.Response(currentDate())
+            matches(text, "fecha", "dia") -> CommandResult.Response(currentDate())
             matches(text, "hola") -> CommandResult.Response("hola")
-            matches(text, "estas", "estás", "tal") -> CommandResult.Response("bien, gracias")
+            matches(text, "estas", "tal") -> CommandResult.Response("bien, gracias")
 
             else -> CommandResult.Response("no entiendo")
         }
@@ -57,7 +71,6 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         for (p in openPrefixes) {
             if (text.startsWith(p)) {
                 val raw = text.removePrefix(p).trim()
-                // Limpiar palabras de cola que Vosk a veces añade
                 val stripped = raw
                     .removeSuffix(" callate").removeSuffix(" calla")
                     .removeSuffix(" por favor").removeSuffix(" ahora").removeSuffix(" ya")
@@ -71,11 +84,8 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
     private fun matches(text: String, vararg keywords: String): Boolean {
         val words = text.split("\\s+".toRegex()).filter { it.isNotBlank() }
         return keywords.any { kw ->
-            if (kw.contains(" ")) {
-                text.contains(kw)  // multi-palabra, substring
-            } else {
-                words.any { w -> w == kw || (w.startsWith(kw) && w.length - kw.length <= 3) }
-            }
+            if (kw.contains(" ")) text.contains(kw)
+            else words.any { w -> w == kw || (w.startsWith(kw) && w.length - kw.length <= 3) }
         }
     }
 
