@@ -2,9 +2,9 @@ package io.github.stringmanolo.vocalia.core
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import io.github.stringmanolo.vocalia.util.InternalDebug
+import java.text.Normalizer
 
 class AppLauncher(private val context: Context) {
 
@@ -26,18 +26,13 @@ class AppLauncher(private val context: Context) {
         "newpipe" to listOf("org.schabi.newpipe"),
         "spotify" to listOf("com.spotify.music"),
         "musica" to listOf("com.spotify.music", "com.huawei.music"),
-        "música" to listOf("com.spotify.music", "com.huawei.music"),
         "camara" to listOf("com.android.camera", "com.huawei.camera"),
-        "cámara" to listOf("com.android.camera", "com.huawei.camera"),
         "galeria" to listOf("com.android.gallery3d", "com.huawei.photos"),
-        "galería" to listOf("com.android.gallery3d", "com.huawei.photos"),
         "fotos" to listOf("com.android.gallery3d", "com.huawei.photos"),
         "ajustes" to listOf("com.android.settings"),
         "configuracion" to listOf("com.android.settings"),
-        "configuración" to listOf("com.android.settings"),
         "contactos" to listOf("com.android.contacts", "com.huawei.contacts"),
         "telefono" to listOf("com.android.dialer", "com.huawei.contacts"),
-        "teléfono" to listOf("com.android.dialer", "com.huawei.contacts"),
         "marcador" to listOf("com.android.dialer", "com.huawei.contacts"),
         "calculadora" to listOf("com.android.calculator2", "com.huawei.calculator"),
         "reloj" to listOf("com.android.deskclock", "com.huawei.deskclock"),
@@ -50,36 +45,33 @@ class AppLauncher(private val context: Context) {
         "correo" to listOf("com.google.android.gm", "com.huawei.email"),
         "aurora" to listOf("com.aurora.store"),
         "fdroid" to listOf("org.fdroid.fdroid"),
-        "app gallery" to listOf("com.huawei.appmarket"),
         "appgallery" to listOf("com.huawei.appmarket")
     )
 
     @Volatile private var cachedInstalledApps: List<Pair<String, String>>? = null
 
-    /** Pre-carga la lista de apps instaladas. Llamar una vez al arrancar. */
     fun preload() {
         cachedInstalledApps = loadInstalledApps()
         InternalDebug.mark("AppLauncher: preload ${cachedInstalledApps?.size ?: 0} apps")
     }
 
-    /** Lista de nombres visibles de todas las apps instaladas (lowercase, sin duplicados). */
-    fun getAllInstalledAppNames(): List<String> {
-        return getInstalledApps().map { it.first.lowercase() }.distinct().sorted()
-    }
+    fun getAllInstalledAppNames(): List<String> =
+        getInstalledApps().map { it.first.lowercase() }.distinct().sorted()
 
-    /** true si el nombre corresponde a una app instalada (curada o por label). */
+    /** Devuelve las primeras N apps instaladas (labels originales) para leer por TTS. */
+    fun getTopAppsForTTS(limit: Int = 10): List<String> =
+        getInstalledApps().map { it.first }.distinct().sorted().take(limit)
+
     fun hasApp(name: String): Boolean {
-        val query = name.lowercase().trim()
+        val query = normalize(name)
         if (query.isBlank()) return false
-        // 1. Curada
         if (knownApps.containsKey(query)) {
             return knownApps[query]!!.any { pkg ->
                 try { context.packageManager.getLaunchIntentForPackage(pkg) != null }
                 catch (_: Throwable) { false }
             }
         }
-        // 2. Por label
-        return getInstalledApps().any { (label, _) -> label.lowercase() == query }
+        return getInstalledApps().any { (label, _) -> normalize(label) == query }
     }
 
     private fun getInstalledApps(): List<Pair<String, String>> =
@@ -91,7 +83,7 @@ class AppLauncher(private val context: Context) {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
         return try {
-            pm.queryIntentActivities(intent, 0).mapNotNull { ri ->
+            pm.queryIntentActivities(intent, 0).mapNotNull { ri: ResolveInfo ->
                 val label = ri.loadLabel(pm)?.toString() ?: return@mapNotNull null
                 val pkg = ri.activityInfo?.packageName ?: return@mapNotNull null
                 label to pkg
@@ -103,27 +95,26 @@ class AppLauncher(private val context: Context) {
     }
 
     fun launch(appName: String): Result {
-        val query = appName.lowercase().trim()
-        InternalDebug.mark("AppLauncher: launch(\"$query\")")
+        val query = normalize(appName)
+        InternalDebug.mark("AppLauncher: launch(\"$appName\") norm=\"$query\"")
 
-        // 1. Curada
         val curated = knownApps[query]
         if (curated != null) {
-            for (pkg in curated) {
-                if (launchPackage(pkg)) return Result.Ok(appName)
-            }
+            for (pkg in curated) if (launchPackage(pkg)) return Result.Ok(appName)
             InternalDebug.mark("AppLauncher: curado \"$query\" sin match instalado")
         }
 
-        // 2. Búsqueda difusa por label
         val apps = getInstalledApps()
-        InternalDebug.mark("AppLauncher: ${apps.size} apps instaladas (caché)")
+        InternalDebug.mark("AppLauncher: ${apps.size} apps (caché)")
+        val normalizedApps = apps.map { normalize(it.first) to it }
+        val exact = normalizedApps.firstOrNull { it.first == query }?.second
+        val startsWith = exact ?: normalizedApps.firstOrNull { it.first.startsWith(query) }?.second
+        val wordMatch = startsWith ?: normalizedApps.firstOrNull { (label, _) ->
+            label.split("\\s+".toRegex()).any { it == query }
+        }?.second
 
-        val exact = apps.firstOrNull { it.first.lowercase() == query }
-        val partial = exact ?: apps.firstOrNull { it.first.lowercase().contains(query) }
-
-        if (partial != null) {
-            val (label, pkg) = partial
+        if (wordMatch != null) {
+            val (label, pkg) = wordMatch
             InternalDebug.mark("AppLauncher: match \"$query\" -> $pkg ($label)")
             if (launchPackage(pkg)) return Result.Ok(appName)
         }
@@ -137,7 +128,11 @@ class AppLauncher(private val context: Context) {
             InternalDebug.mark("AppLauncher: sin launchIntent para $pkg")
             return false
         }
-        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        launchIntent.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK
+                or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                or Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT
+        )
         context.startActivity(launchIntent)
         InternalDebug.mark("AppLauncher: startActivity OK -> $pkg")
         true
@@ -145,4 +140,8 @@ class AppLauncher(private val context: Context) {
         InternalDebug.mark("AppLauncher: launchPackage($pkg) THREW ${t.javaClass.simpleName}: ${t.message}")
         false
     }
+
+    private fun normalize(s: String): String =
+        Normalizer.normalize(s.lowercase().trim(), Normalizer.Form.NFD)
+            .replace("\\p{Mn}+".toRegex(), "")
 }

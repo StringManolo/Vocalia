@@ -4,7 +4,6 @@ import android.content.Context
 import io.github.stringmanolo.vocalia.util.InternalDebug
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 class TtsManager(private val context: Context) {
 
@@ -23,7 +22,7 @@ class TtsManager(private val context: Context) {
     @Volatile private var speaking = false
     @Volatile private var paused = false
     @Volatile private var stopped = false
-    private var speakThread: Thread? = null
+    @Volatile private var speakThread: Thread? = null
 
     private fun dbg(msg: String) { InternalDebug.mark("[${Thread.currentThread().name}] TtsManager: $msg") }
 
@@ -104,7 +103,7 @@ class TtsManager(private val context: Context) {
         val chunks = splitIntoChunks(text)
         dbg("speak: ${chunks.size} chunks, ${text.length} chars")
 
-        speakThread = Thread({
+        val th = Thread({
             var started = false
             try {
                 for ((idx, chunk) in chunks.withIndex()) {
@@ -133,7 +132,9 @@ class TtsManager(private val context: Context) {
                 stopped = false
                 onComplete?.invoke()
             }
-        }, "tts-chunk").start()
+        }, "tts-chunk")
+        speakThread = th
+        th.start()
     }
 
     fun pause() {

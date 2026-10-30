@@ -131,7 +131,6 @@ class VocaliaCore(
         cancelTimeouts()
         voskEngine.stopListening()
         voskEngine.setGrammar(GRAMMAR_TTS_SPEAKING)
-        // Sin delay: la gramática restringida filtra el eco del TTS
         voskEngine.startListening()
         log("Vosk escuchando (TTS_SPEAKING, gramática restringida)")
     }
