@@ -89,6 +89,12 @@ class VocaliaCore(
 
     @Volatile private var isBlockingHelp = false
 
+    /** true mientras la escucha continua esté activada (también dentro del modo usar). */
+    private var continuousEnabled = false
+
+    /** Instante hasta el que se acepta un comando sin wake word tras decir solo "vocalia" en modo usar. */
+    private var uiWakeArmedUntil = 0L
+
     private val resumeDelayMs = 10L
     private val listeningTimeoutMs = 5_000L
     private val safetyTimeoutMs = 600_000L
@@ -129,6 +135,7 @@ class VocaliaCore(
     private fun enterIdle(speak: String? = null) {
         log("enterIdle")
         state = State.IDLE
+        continuousEnabled = false
         isBlockingHelp = false
         cancelTimeouts()
         voskEngine.stopListening()
@@ -145,6 +152,7 @@ class VocaliaCore(
     private fun enterContinuous(speak: String? = null) {
         log("enterContinuous")
         state = State.CONTINUOUS
+        continuousEnabled = true
         isBlockingHelp = false
         cancelTimeouts()
         voskEngine.stopListening()
@@ -159,31 +167,45 @@ class VocaliaCore(
     }
 
     /**
-     * Modo usar: escucha con gramática reducida, acepta comandos sin wake word,
-     * y expira por inactividad a los [uiNavigationTimeoutMs] ms.
+     * Sale del modo usar: vuelve a escucha continua si estaba activada, o a IDLE.
      */
-    private fun enterUiNavigation() {
-        log("enterUiNavigation")
+    private fun leaveUiMode(speak: String? = null) {
+        if (continuousEnabled) enterContinuous(speak) else enterIdle(speak)
+    }
+
+    /**
+     * Modo usar: escucha con gramática reducida y expira por inactividad a los
+     * [uiNavigationTimeoutMs] ms. Requiere wake word salvo en escucha continua.
+     *
+     * @param refreshList true solo al ENTRAR al modo o cuando la pantalla ha podido
+     *                    cambiar (pulsar, atrás, scroll). En el resto de casos NO se
+     *                    refresca, para conservar la posición del elemento actual.
+     */
+    private fun enterUiNavigation(refreshList: Boolean = false) {
+        log("enterUiNavigation refreshList=$refreshList")
         state = State.UI_NAVIGATION
         isBlockingHelp = false
+        uiWakeArmedUntil = 0L
         cancelTimeouts()
         voskEngine.stopListening()
         voskEngine.setGrammar(GRAMMAR_UI_NAVIGATION)
         voskEngine.startListening()
 
-        mainHandler.post {
-            try {
-                VocaliaAccessibilityService.instance?.refreshNodeList()
-                log("UI_NAVIGATION: lista de nodos refrescada")
-            } catch (t: Throwable) {
-                log("UI_NAVIGATION: refresh THREW ${t.javaClass.simpleName}: ${t.message}")
+        if (refreshList) {
+            mainHandler.post {
+                try {
+                    VocaliaAccessibilityService.instance?.refreshNodeList()
+                    log("UI_NAVIGATION: lista de nodos refrescada")
+                } catch (t: Throwable) {
+                    log("UI_NAVIGATION: refresh THREW ${t.javaClass.simpleName}: ${t.message}")
+                }
             }
         }
 
         uiTimeoutRunnable = Runnable {
             if (state == State.UI_NAVIGATION) {
                 log("UI_NAVIGATION timeout por inactividad")
-                speakAndReturn("saliendo del modo usar por inactividad") { enterIdle() }
+                speakAndReturn("saliendo del modo usar por inactividad") { leaveUiMode() }
             }
         }.also { mainHandler.postDelayed(it, uiNavigationTimeoutMs) }
     }
@@ -294,13 +316,16 @@ class VocaliaCore(
      * y devuelve el texto que produce al hilo del TTS.
      * Si el servicio no está disponible, sale del modo usar.
      */
-    private fun a11yCommand(action: (VocaliaAccessibilityService) -> String) {
+    private fun a11yCommand(
+        refreshAfter: Boolean = false,
+        action: (VocaliaAccessibilityService) -> String
+    ) {
         mainHandler.post {
             val svc = VocaliaAccessibilityService.instance
             if (svc == null) {
                 log("a11y: servicio no disponible")
                 speakAndReturn("servicio de accesibilidad no disponible, actívalo en ajustes") {
-                    enterIdle()
+                    leaveUiMode()
                 }
                 return@post
             }
@@ -312,7 +337,8 @@ class VocaliaCore(
             }
             log("a11y result: \"$msg\"")
             speakAndReturn(msg) {
-                if (state == State.EXECUTING) enterUiNavigation() else enterIdle()
+                if (state == State.EXECUTING) enterUiNavigation(refreshList = refreshAfter)
+                else enterIdle()
             }
         }
     }
@@ -357,11 +383,24 @@ class VocaliaCore(
             }
             State.UI_NAVIGATION -> {
                 val (hasWake, remainder) = extractWake(text)
+                val now = System.currentTimeMillis()
                 val command = when {
                     hasWake && remainder.isNotBlank() -> remainder
-                    hasWake -> ""
-                    else -> text
+                    hasWake -> {
+                        // Solo "vocalia": se arma una ventana corta para el comando siguiente
+                        uiWakeArmedUntil = now + listeningTimeoutMs
+                        voskEngine.beep()
+                        log("UI_NAVIGATION: wake word sola, esperando comando")
+                        return
+                    }
+                    continuousEnabled -> text
+                    now < uiWakeArmedUntil -> text
+                    else -> {
+                        log("UI_NAVIGATION: \"$text\" ignorado (falta wake word)")
+                        return
+                    }
                 }
+                uiWakeArmedUntil = 0L
                 if (command.isBlank()) return
                 handleCommand(command, State.UI_NAVIGATION)
             }
@@ -551,22 +590,22 @@ class VocaliaCore(
                 if (svc == null) {
                     log("EnterUiMode: accesibilidad no disponible")
                     speakAndReturn("servicio de accesibilidad no disponible, actívalo en ajustes") {
-                        enterIdle()
+                        afterExecution()
                     }
                 } else {
                     log("EnterUiMode: activando modo usar")
-                    speakAndReturn("modo usar activado") { enterUiNavigation() }
+                    speakAndReturn("modo usar activado") { enterUiNavigation(refreshList = true) }
                 }
             }
             CommandResult.ExitUiMode -> {
                 log("ExitUiMode")
-                speakAndReturn("modo usar desactivado") { enterIdle() }
+                speakAndReturn("modo usar desactivado") { leaveUiMode() }
             }
             CommandResult.UiNext     -> a11yCommand { it.nextNode() }
             CommandResult.UiPrevious -> a11yCommand { it.previousNode() }
             CommandResult.UiRead     -> a11yCommand { it.readCurrentNode() }
-            CommandResult.UiClick    -> a11yCommand { it.clickCurrentNode() }
-            CommandResult.UiBack     -> a11yCommand { it.performBack() }
+            CommandResult.UiClick    -> a11yCommand(refreshAfter = true) { it.clickCurrentNode() }
+            CommandResult.UiBack     -> a11yCommand(refreshAfter = true) { it.performBack() }
             CommandResult.UiPaste    -> a11yCommand { it.pasteClipboard() }
             is CommandResult.UiScroll -> {
                 val dir = when (parsed.direction) {
@@ -575,7 +614,7 @@ class VocaliaCore(
                     CommandResult.UiDirection.LEFT  -> VocaliaAccessibilityService.ScrollDirection.LEFT
                     CommandResult.UiDirection.RIGHT -> VocaliaAccessibilityService.ScrollDirection.RIGHT
                 }
-                a11yCommand { it.scroll(dir) }
+                a11yCommand(refreshAfter = true) { it.scroll(dir) }
             }
         }
     }

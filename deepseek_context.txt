@@ -391,32 +391,62 @@ class VocaliaService : Service() {
         ttsManager.init()
     }
 
-
-        private fun buildGrammar(appNames: List<String>, aliases: Set<String>): String {
+    private fun buildGrammar(appNames: List<String>, aliases: Set<String>): String {
         val commands = mutableListOf(
-            // Wake words (vocalia / boca lia)
+            // Wake words
             "vocalia", "vocalía", "boca lia", "boca lía", "bocalia",
-            // Comandos
+            // Comandos generales
             "que hora es", "que hora", "la hora", "hora es",
             "que dia es", "que dia", "que fecha", "fecha",
-            "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "silencio", "callate",
+            "descansa", "descanso", "descansar", "cansa", "duerme", "dormir",
+            "silencio", "callate",
             "hola", "que tal", "como estas",
-            "usa voz inteligente", "voz inteligente", "usa voz por defecto", "voz por defecto",
+            "usa voz inteligente", "voz inteligente",
+            "usa voz por defecto", "voz por defecto",
             "escucha continua", "modo continuo", "escucha constante",
-            "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo",
-            "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
+            "sal de escucha continua", "desactiva escucha continua",
+            "desactiva modo continuo",
+            "pausa el tts", "pausa el texto", "pausa la lectura",
+            "pausa lectura", "pausa voz",
             "para el tts", "para el texto", "para la lectura",
             "pausa", "para", "parar", "pausar",
-            "continua el tts", "continua el texto", "continua la lectura", "continua lectura", "continua voz",
-            "reanuda el tts", "reanuda la lectura", "sigue leyendo", "continua", "reanuda", "sigue",
-            "lista apps", "lista de apps", "que apps tengo", "lista de aplicaciones",
-            "listame las apps", "lista de apps disponibles", "todas las apps", "todas las aplicaciones",
+            "continua el tts", "continua el texto", "continua la lectura",
+            "continua lectura", "continua voz",
+            "reanuda el tts", "reanuda la lectura", "sigue leyendo",
+            "continua", "reanuda", "sigue",
+            "lista apps", "lista de apps", "que apps tengo",
+            "lista de aplicaciones", "listame las apps",
+            "lista de apps disponibles", "todas las apps",
+            "todas las aplicaciones",
             "cierra esta app", "cierra la app actual", "cierra esto",
             "cierra la app que esté abierta", "cierra lo que hay delante",
             "ayuda", "que puedes hacer", "que sabes hacer",
             "dime todo lo que puedes hacer", "dime lo que puedes hacer",
-            "guia", "comandos", "lista de comandos",
-            "que comandos tienes"
+            "guia", "comandos", "lista de comandos", "que comandos tienes",
+
+            // === Modo usar (UI navigation) ===
+            "modo usar", "activar modo usar", "activa el modo usar",
+            "entra al modo usar", "entrar al modo usar",
+            "modo navegacion", "modo navegación",
+            "activar modo navegacion", "activa el modo navegacion",
+            "sal del modo usar", "salir del modo usar", "salir del modo",
+            "desactiva el modo usar", "termina el modo usar", "fin del modo usar",
+            "sal del modo navegacion", "salir del modo navegacion",
+            "siguiente", "avanza", "siguiente elemento", "el siguiente",
+            "anterior", "retrocede", "anterior elemento", "el anterior",
+            "lee", "leer", "lee elemento", "leer elemento", "léelo", "leelo",
+            "pulsa", "pulsar", "toca", "tocar",
+            "activa elemento", "activar elemento", "click", "clic",
+            "atrás", "atras", "back", "regresa", "volver atrás", "vuelve atrás",
+            "arrastra arriba", "arrastra abajo",
+            "arrastra izquierda", "arrastra derecha",
+            "arrastra elemento arriba", "arrastra elemento abajo",
+            "arrastra elemento izquierda", "arrastra elemento derecha",
+            "scroll arriba", "scroll abajo",
+            "desplaza arriba", "desplaza abajo",
+            "sube", "baja",
+            "pega", "pegar", "portapapeles pegar",
+            "pega el portapapeles", "pega del portapapeles"
         )
 
         val added = mutableSetOf<String>()
@@ -479,7 +509,10 @@ class VocaliaService : Service() {
     private fun startForegroundCompat() {
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            startForeground(
+                NOTIFICATION_ID, notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -519,28 +552,215 @@ class VocaliaService : Service() {
 
 ===== app/src/main/java/io/github/stringmanolo/vocalia/VocaliaAccessibilityService.kt =====
 package io.github.stringmanolo.vocalia
-import io.github.stringmanolo.vocalia.util.VocaliaLogger
 
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import io.github.stringmanolo.vocalia.util.InternalDebug
 
+/**
+ * Servicio de accesibilidad de Vocalia.
+ *
+ * Expone una lista ordenada de nodos "interactivos" (BFS) y métodos para
+ * navegar por ella, leer su descripción, pulsarla, hacer scroll, ir atrás
+ * y pegar del portapapeles.
+ *
+ * Toda la operativa se asume llamada desde el hilo principal (VocaliaCore
+ * lo hace a través de mainHandler.post).
+ */
 class VocaliaAccessibilityService : AccessibilityService() {
 
     companion object {
-        private const val TAG = "VocaliaA11y"
+        private const val MAX_NODES = 120
+
+        @Volatile
+        var instance: VocaliaAccessibilityService? = null
+            private set
     }
+
+    enum class ScrollDirection { UP, DOWN, LEFT, RIGHT }
+
+    /** Lista actual de nodos interactivos (orden BFS). */
+    private var interactiveNodes: List<AccessibilityNodeInfo> = emptyList()
+
+    /** Índice actual sobre `interactiveNodes`. -1 si no hay selección. */
+    private var currentIndex: Int = -1
+
+    private fun dbg(msg: String) {
+        InternalDebug.mark("[A11y] $msg")
+    }
+
+    // ----------------------------------------------------------------
+    // Ciclo de vida
+    // ----------------------------------------------------------------
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        VocaliaLogger.i(TAG, "AccessibilityService conectado")
+        instance = this
+        dbg("onServiceConnected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Stub de Fase 0. En Fase 2 leeremos y accionaremos nodos.
+        // Stub. En fases posteriores refrescaremos en TYPE_WINDOW_STATE_CHANGED.
     }
 
     override fun onInterrupt() {
-        VocaliaLogger.i(TAG, "AccessibilityService interrumpido")
+        dbg("onInterrupt")
+    }
+
+    override fun onDestroy() {
+        if (instance === this) instance = null
+        dbg("onDestroy")
+        super.onDestroy()
+    }
+
+    // ----------------------------------------------------------------
+    // Construcción de la lista de nodos
+    // ----------------------------------------------------------------
+
+    /**
+     * Recorre el árbol de la ventana activa (BFS) y construye una lista con
+     * los nodos visibles que son interactuables o contienen texto.
+     */
+    fun refreshNodeList() {
+        val root = rootInActiveWindow
+        if (root == null) {
+            interactiveNodes = emptyList()
+            currentIndex = -1
+            dbg("refreshNodeList: rootInActiveWindow=null")
+            return
+        }
+        val result = mutableListOf<AccessibilityNodeInfo>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+
+        while (queue.isNotEmpty() && result.size < MAX_NODES) {
+            val node = queue.removeFirst()
+            if (!node.isVisibleToUser) continue
+
+            val hasText = !node.text.isNullOrBlank() ||
+                          !node.contentDescription.isNullOrBlank()
+            val isInteractive = node.isClickable || node.isFocusable || node.isEditable
+
+            if (isInteractive || hasText) {
+                result.add(node)
+            }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+
+        interactiveNodes = result
+        currentIndex = if (result.isNotEmpty()) 0 else -1
+        dbg("refreshNodeList: ${result.size} nodos, index=$currentIndex")
+    }
+
+    private fun getCurrentNode(): AccessibilityNodeInfo? =
+        if (currentIndex in interactiveNodes.indices) interactiveNodes[currentIndex] else null
+
+    /**
+     * Genera una descripción natural de un nodo: texto + contentDescription
+     * + tipo (botón, campo de texto, casilla…) + pista opcional.
+     */
+    private fun describeNode(node: AccessibilityNodeInfo): String {
+        val text  = node.text?.toString()?.takeIf { it.isNotBlank() }
+        val desc  = node.contentDescription?.toString()?.takeIf { it.isNotBlank() }
+        val hint  = node.hintText?.toString()?.takeIf { it.isNotBlank() }
+
+        val type = when {
+            node.isEditable   -> "campo de texto"
+            node.isCheckable  -> "casilla"
+            node.isClickable  -> "botón"
+            node.isFocusable  -> "elemento"
+            else              -> "texto"
+        }
+
+        val content = when {
+            text != null && desc != null && text != desc -> "$text, $desc"
+            text != null -> text
+            desc != null -> desc
+            else -> ""
+        }
+
+        val hintSuffix = if (hint != null) ", pista: $hint" else ""
+
+        return if (content.isBlank()) type
+               else "$content. $type$hintSuffix"
+    }
+
+    // ----------------------------------------------------------------
+    // Navegación
+    // ----------------------------------------------------------------
+
+    fun readCurrentNode(): String {
+        if (interactiveNodes.isEmpty()) {
+            return "no hay elementos. Prueba a decir siguiente o anterior."
+        }
+        val node = getCurrentNode() ?: return "no hay elemento seleccionado"
+        val desc = describeNode(node)
+        dbg("read [$currentIndex/${interactiveNodes.size - 1}] -> \"$desc\"")
+        return desc
+    }
+
+    fun nextNode(): String {
+        if (interactiveNodes.isEmpty()) refreshNodeList()
+        if (interactiveNodes.isEmpty()) return "no hay elementos"
+        currentIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % interactiveNodes.size
+        return readCurrentNode()
+    }
+
+    fun previousNode(): String {
+        if (interactiveNodes.isEmpty()) refreshNodeList()
+        if (interactiveNodes.isEmpty()) return "no hay elementos"
+        currentIndex = if (currentIndex <= 0) interactiveNodes.size - 1 else currentIndex - 1
+        return readCurrentNode()
+    }
+
+    // ----------------------------------------------------------------
+    // Acciones
+    // ----------------------------------------------------------------
+
+    fun clickCurrentNode(): String {
+        val node = getCurrentNode() ?: return "no hay elemento seleccionado"
+        if (!node.refresh()) {
+            refreshNodeList()
+            return "el elemento ya no está disponible, lista actualizada"
+        }
+        if (!node.isClickable) return "este elemento no se puede pulsar"
+        val ok = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        dbg("click [$currentIndex] -> ok=$ok")
+        return if (ok) "pulsado" else "no se pudo pulsar"
+    }
+
+    fun performBack(): String {
+        val ok = performGlobalAction(GLOBAL_ACTION_BACK)
+        dbg("back -> ok=$ok")
+        refreshNodeList()
+        return if (ok) "atrás" else "no se pudo volver atrás"
+    }
+
+    fun scroll(direction: ScrollDirection): String {
+        val node = getCurrentNode() ?: rootInActiveWindow
+        if (node == null) return "no hay ventana activa"
+        val action = when (direction) {
+            ScrollDirection.UP, ScrollDirection.LEFT ->
+                AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+            ScrollDirection.DOWN, ScrollDirection.RIGHT ->
+                AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+        }
+        val ok = node.performAction(action)
+        dbg("scroll $direction -> ok=$ok (nodo=${node.className})")
+        refreshNodeList()
+        return if (ok) "desplazado" else "no se pudo desplazar"
+    }
+
+    fun pasteClipboard(): String {
+        val root = rootInActiveWindow ?: return "no hay ventana activa"
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            ?: return "no hay campo de texto enfocado"
+        val ok = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        dbg("paste -> ok=$ok (foco=${focused.className})")
+        return if (ok) "pegado" else "no se pudo pegar"
     }
 }
 
@@ -676,6 +896,18 @@ sealed class CommandResult {
     data class SetVoiceMode(val intelligent: Boolean) : CommandResult()
     data class OpenApp(val appName: String) : CommandResult()
     data class CloseApp(val appName: String) : CommandResult()
+
+    // --- Modo usar (navegación UI) ---
+    object EnterUiMode : CommandResult()
+    object ExitUiMode : CommandResult()
+    object UiNext : CommandResult()
+    object UiPrevious : CommandResult()
+    object UiRead : CommandResult()
+    object UiClick : CommandResult()
+    object UiBack : CommandResult()
+    object UiPaste : CommandResult()
+    enum class UiDirection { UP, DOWN, LEFT, RIGHT }
+    data class UiScroll(val direction: UiDirection) : CommandResult()
 }
 
 class CommandParser(private val appLauncher: AppLauncher? = null) {
@@ -696,42 +928,121 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
 
     fun parse(raw: String): CommandResult {
         val text = raw.lowercase(esLocale).trim()
-        return when {
-            text.isBlank() -> CommandResult.Response("no te he entendido")
+        if (text.isBlank()) return CommandResult.Response("no te he entendido")
 
+        // ============================================================
+        // Modo usar (UI navigation) — entrada / salida
+        // ============================================================
+        if (matches(text,
+                "modo usar", "activar modo usar", "activa el modo usar",
+                "entra al modo usar", "entrar al modo usar",
+                "modo navegacion", "modo navegación",
+                "activar modo navegacion", "activa el modo navegacion")) {
+            return CommandResult.EnterUiMode
+        }
+        if (matches(text,
+                "sal del modo usar", "salir del modo usar", "salir del modo",
+                "desactiva el modo usar", "termina el modo usar", "fin del modo usar",
+                "sal del modo navegacion", "salir del modo navegacion")) {
+            return CommandResult.ExitUiMode
+        }
+
+        // ============================================================
+        // Comandos dentro del modo usar
+        // ============================================================
+        if (matches(text,
+                "arrastra arriba", "arrastra elemento arriba",
+                "scroll arriba", "desplaza arriba", "sube")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.UP)
+        }
+        if (matches(text,
+                "arrastra abajo", "arrastra elemento abajo",
+                "scroll abajo", "desplaza abajo", "baja")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.DOWN)
+        }
+        if (matches(text,
+                "arrastra izquierda", "arrastra elemento izquierda",
+                "scroll izquierda", "desplaza izquierda")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.LEFT)
+        }
+        if (matches(text,
+                "arrastra derecha", "arrastra elemento derecha",
+                "scroll derecha", "desplaza derecha")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.RIGHT)
+        }
+        if (matches(text, "siguiente", "avanza",
+                "siguiente elemento", "el siguiente")) {
+            return CommandResult.UiNext
+        }
+        if (matches(text, "anterior", "retrocede",
+                "anterior elemento", "el anterior")) {
+            return CommandResult.UiPrevious
+        }
+        if (matches(text,
+                "lee elemento", "leer elemento",
+                "lee", "leer", "léelo", "leelo")) {
+            return CommandResult.UiRead
+        }
+        if (matches(text,
+                "pulsa", "pulsar", "toca", "tocar",
+                "activa elemento", "activar elemento",
+                "click", "clic")) {
+            return CommandResult.UiClick
+        }
+        if (matches(text,
+                "atrás", "atras", "back",
+                "volver atrás", "vuelve atrás", "regresa")) {
+            return CommandResult.UiBack
+        }
+        if (matches(text,
+                "portapapeles pegar", "pega el portapapeles",
+                "pega del portapapeles", "pega", "pegar")) {
+            return CommandResult.UiPaste
+        }
+
+        // ============================================================
+        // Resto de comandos (ya existentes)
+        // ============================================================
+        return when {
             matches(text, "ayuda", "qué puedes hacer", "que puedes hacer",
-                "qué sabes hacer", "que sabes hacer", "dime todo lo que puedes hacer",
-                "dime lo que puedes hacer", "guía", "guia", "comandos",
+                "qué sabes hacer", "que sabes hacer",
+                "dime todo lo que puedes hacer", "dime lo que puedes hacer",
+                "guía", "guia", "comandos",
                 "lista de comandos", "qué comandos tienes", "que comandos tienes") ->
                 CommandResult.Help
 
-            matches(text, "lístame las apps", "listame las apps", "lista de apps disponibles",
-                "lista completa de apps", "qué apps disponibles", "que apps disponibles",
+            matches(text, "lístame las apps", "listame las apps",
+                "lista de apps disponibles", "lista completa de apps",
+                "qué apps disponibles", "que apps disponibles",
                 "todas las apps", "todas las aplicaciones") ->
                 CommandResult.ListAppsVerbose
 
-            matches(text, "lista de apps", "lista apps", "qué apps tengo", "que apps tengo",
-                "lista de aplicaciones") ->
+            matches(text, "lista de apps", "lista apps",
+                "qué apps tengo", "que apps tengo", "lista de aplicaciones") ->
                 CommandResult.ListApps
 
-            // EnterContinuous antes que ResumeTts y PauseTts
-            matches(text, "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo") ->
+            matches(text, "sal de escucha continua", "desactiva escucha continua",
+                "desactiva modo continuo") ->
                 CommandResult.ExitContinuous
+
             matches(text, "escucha continua", "modo continuo", "escucha constante") ->
                 CommandResult.EnterContinuous
 
-            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
+            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura",
+                "pausa lectura", "pausa voz",
                 "para el tts", "para el texto", "para la lectura",
-                "pausa", "para", "parar", "pausar", "silencio", "callate", "callá", "stop",
-                "detente", "basta", "alto", "quieto") ->
+                "pausa", "para", "parar", "pausar", "silencio", "callate",
+                "callá", "stop", "detente", "basta", "alto", "quieto") ->
                 CommandResult.PauseTts
 
-            matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura",
-                "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo",
+            matches(text, "continua el tts", "continua el texto",
+                "continua la lectura", "continua lectura", "continua voz",
+                "reanuda el tts", "reanuda la lectura", "sigue leyendo",
                 "continua", "continúa", "reanuda", "sigue") ->
                 CommandResult.ResumeTts
 
-            extractCloseAppName(text) != null -> CommandResult.CloseApp(extractCloseAppName(text)!!)
+            extractCloseAppName(text) != null ->
+                CommandResult.CloseApp(extractCloseAppName(text)!!)
 
             matches(text, "cierra esta app", "cierra la app actual", "cierra esto",
                 "cierra la app que esté abierta", "cierra lo que hay delante") ->
@@ -740,7 +1051,8 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
             extractAppName(text) != null -> CommandResult.OpenApp(extractAppName(text)!!)
             appLauncher?.hasApp(text) == true -> CommandResult.OpenApp(text)
 
-            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir") ->
+            matches(text, "descansa", "descanso", "descansar",
+                "cansa", "duerme", "dormir") ->
                 CommandResult.Sleep
 
             matches(text, "inteligente", "piper", "neuronal", "natural") ->
@@ -809,6 +1121,7 @@ package io.github.stringmanolo.vocalia.core
 
 import android.os.Handler
 import android.os.Looper
+import io.github.stringmanolo.vocalia.VocaliaAccessibilityService
 import io.github.stringmanolo.vocalia.VoskEngine
 import io.github.stringmanolo.vocalia.tts.TtsManager
 import org.json.JSONObject
@@ -820,7 +1133,10 @@ class VocaliaCore(
     private val appLauncher: AppLauncher,
     private val log: (String) -> Unit
 ) {
-    private enum class State { IDLE, LISTENING, EXECUTING, CONTINUOUS, TTS_SPEAKING, TTS_PAUSED }
+    private enum class State {
+        IDLE, LISTENING, EXECUTING, CONTINUOUS,
+        TTS_SPEAKING, TTS_PAUSED, UI_NAVIGATION
+    }
 
     companion object {
         val WAKE_WORDS = listOf(
@@ -835,6 +1151,27 @@ class VocaliaCore(
             "boca lia detente", "boca lia silencio",
             "vocalia para", "vocalia pausa", "vocalia stop",
             "vocalia detente", "vocalia silencio",
+            "[unk]"
+        ]"""
+
+        const val GRAMMAR_UI_NAVIGATION = """[
+            "vocalia", "vocalía", "boca lia", "boca lía", "bocalia",
+            "siguiente", "avanza", "siguiente elemento", "el siguiente",
+            "anterior", "retrocede", "anterior elemento", "el anterior",
+            "lee", "leer", "lee elemento", "leer elemento", "léelo", "leelo",
+            "pulsa", "pulsar", "toca", "tocar", "activar elemento", "activa elemento",
+            "click", "clic",
+            "atrás", "atras", "back", "regresa", "volver atrás", "vuelve atrás",
+            "arrastra arriba", "arrastra abajo", "arrastra izquierda", "arrastra derecha",
+            "arrastra elemento arriba", "arrastra elemento abajo",
+            "arrastra elemento izquierda", "arrastra elemento derecha",
+            "scroll arriba", "scroll abajo", "desplaza arriba", "desplaza abajo",
+            "sube", "baja",
+            "pega", "pegar", "portapapeles pegar", "pega el portapapeles",
+            "sal del modo usar", "salir del modo usar", "salir del modo",
+            "desactiva el modo usar", "termina el modo usar", "fin del modo usar",
+            "descansa", "descanso", "descansar", "duerme", "dormir",
+            "para", "pausa", "silencio", "callate", "stop",
             "[unk]"
         ]"""
 
@@ -853,7 +1190,11 @@ class VocaliaCore(
             "Que te lea todas las apps: di vocalia, lístame las apps. " +
             "Reanudar una lectura pausada: di vocalia, continúa. " +
             "Saludarme: di vocalia, hola. " +
-            "Y repetir esto: di vocalia, ayuda."
+            "Y repetir esto: di vocalia, ayuda. " +
+            "Para navegar por la pantalla: di vocalia, modo usar. " +
+            "Y dentro de él: siguiente, anterior, lee elemento, pulsa, atrás, " +
+            "arrastra arriba, arrastra abajo, arrastra izquierda, arrastra derecha, " +
+            "portapapeles pegar. Sal con vocalia, sal del modo usar."
     }
 
     private var state = State.IDLE
@@ -863,21 +1204,23 @@ class VocaliaCore(
     private var timeoutRunnable: Runnable? = null
     private var safetyRunnable: Runnable? = null
     private var resumeRunnable: Runnable? = null
+    private var uiTimeoutRunnable: Runnable? = null
 
-    /**
-     * Si es true, Vosk se detiene por completo (deja de escuchar) hasta que el TTS termine.
-     * Es exclusivo para "Ayuda": mientras dura, no se procesa ningún resultado de voz.
-     */
     @Volatile private var isBlockingHelp = false
 
     private val resumeDelayMs = 10L
     private val listeningTimeoutMs = 5_000L
     private val safetyTimeoutMs = 600_000L
+    private val uiNavigationTimeoutMs = 90_000L
 
     private val allPauseWords = setOf(
         "para", "pausa", "parar", "pausar", "stop",
         "silencio", "callate", "callá", "detente", "basta", "alto", "quieto"
     )
+
+    // ----------------------------------------------------------------
+    // Ciclo de vida
+    // ----------------------------------------------------------------
 
     fun start(grammar: String) {
         log("start")
@@ -897,6 +1240,10 @@ class VocaliaCore(
         voskEngine.stopListening()
         ttsManager.stop()
     }
+
+    // ----------------------------------------------------------------
+    // Transiciones de estado
+    // ----------------------------------------------------------------
 
     private fun enterIdle(speak: String? = null) {
         log("enterIdle")
@@ -928,6 +1275,36 @@ class VocaliaCore(
         } else {
             resumeListeningWithDelay()
         }
+    }
+
+    /**
+     * Modo usar: escucha con gramática reducida, acepta comandos sin wake word,
+     * y expira por inactividad a los [uiNavigationTimeoutMs] ms.
+     */
+    private fun enterUiNavigation() {
+        log("enterUiNavigation")
+        state = State.UI_NAVIGATION
+        isBlockingHelp = false
+        cancelTimeouts()
+        voskEngine.stopListening()
+        voskEngine.setGrammar(GRAMMAR_UI_NAVIGATION)
+        voskEngine.startListening()
+
+        mainHandler.post {
+            try {
+                VocaliaAccessibilityService.instance?.refreshNodeList()
+                log("UI_NAVIGATION: lista de nodos refrescada")
+            } catch (t: Throwable) {
+                log("UI_NAVIGATION: refresh THREW ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+
+        uiTimeoutRunnable = Runnable {
+            if (state == State.UI_NAVIGATION) {
+                log("UI_NAVIGATION timeout por inactividad")
+                speakAndReturn("saliendo del modo usar por inactividad") { enterIdle() }
+            }
+        }.also { mainHandler.postDelayed(it, uiNavigationTimeoutMs) }
     }
 
     private fun enterListening() {
@@ -963,6 +1340,7 @@ class VocaliaCore(
         when (returnStateAfterExecution) {
             State.CONTINUOUS -> enterContinuous()
             State.TTS_PAUSED -> enterTtsPaused()
+            State.UI_NAVIGATION -> enterUiNavigation()
             else -> enterIdle()
         }
     }
@@ -998,6 +1376,10 @@ class VocaliaCore(
         }.also { mainHandler.postDelayed(it, resumeDelayMs) }
     }
 
+    // ----------------------------------------------------------------
+    // Helpers de TTS + accesibilidad
+    // ----------------------------------------------------------------
+
     private fun speakAndReturn(text: String, after: () -> Unit) {
         ttsManager.speak(text,
             onStart = { enterTtsSpeaking() },
@@ -1009,23 +1391,15 @@ class VocaliaCore(
             })
     }
 
-    /**
-     * Reproduce el TTS bloqueando completamente Vosk mientras dura. Se usa para "Ayuda".
-     * Mientras `isBlockingHelp` sea true, Vosk no escucha y no procesa nada.
-     */
     private fun speakBlocking(text: String, after: () -> Unit) {
         isBlockingHelp = true
         cancelTimeouts()
         voskEngine.stopListening()
         log("Vosk detenido por TTS bloqueante (Ayuda)")
-
         state = State.TTS_SPEAKING
         ttsManager.speak(
             text,
-            onStart = {
-                // Estado ya marcado; Vosk permanece detenido
-                log("TTS bloqueante en curso")
-            },
+            onStart = { log("TTS bloqueante en curso") },
             onComplete = {
                 isBlockingHelp = false
                 state = State.EXECUTING
@@ -1034,11 +1408,42 @@ class VocaliaCore(
         )
     }
 
+    /**
+     * Ejecuta una acción de accesibilidad (que debe correr en el hilo principal)
+     * y devuelve el texto que produce al hilo del TTS.
+     * Si el servicio no está disponible, sale del modo usar.
+     */
+    private fun a11yCommand(action: (VocaliaAccessibilityService) -> String) {
+        mainHandler.post {
+            val svc = VocaliaAccessibilityService.instance
+            if (svc == null) {
+                log("a11y: servicio no disponible")
+                speakAndReturn("servicio de accesibilidad no disponible, actívalo en ajustes") {
+                    enterIdle()
+                }
+                return@post
+            }
+            val msg = try {
+                action(svc)
+            } catch (t: Throwable) {
+                log("a11y THREW ${t.javaClass.simpleName}: ${t.message}")
+                "error de accesibilidad"
+            }
+            log("a11y result: \"$msg\"")
+            speakAndReturn(msg) {
+                if (state == State.EXECUTING) enterUiNavigation() else enterIdle()
+            }
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // Procesamiento de resultados Vosk
+    // ----------------------------------------------------------------
+
     private fun handleResult(json: String) {
         val text = extractText(json)
         if (text.isBlank() || text == "[unk]") return
 
-        // Si estamos reproduciendo la Ayuda, ignoramos cualquier resultado de voz.
         if (isBlockingHelp) {
             log("result: \"$text\" IGNORADO (isBlockingHelp)")
             return
@@ -1069,6 +1474,16 @@ class VocaliaCore(
                 val command = if (hasWake && remainder.isNotBlank()) remainder else text
                 handleCommand(command, State.CONTINUOUS)
             }
+            State.UI_NAVIGATION -> {
+                val (hasWake, remainder) = extractWake(text)
+                val command = when {
+                    hasWake && remainder.isNotBlank() -> remainder
+                    hasWake -> ""
+                    else -> text
+                }
+                if (command.isBlank()) return
+                handleCommand(command, State.UI_NAVIGATION)
+            }
             State.TTS_SPEAKING -> {
                 val (hasWake, _) = extractWake(text)
                 val textLower = text.lowercase()
@@ -1083,10 +1498,8 @@ class VocaliaCore(
                         ttsManager.pause()
                         enterTtsPaused()
                     }
-                    else -> {
-                        // Sin wake word: rechazar para evitar eco del propio TTS
+                    else ->
                         log("TTS_SPEAKING: '$userPauseWord' sin wake word, ignorando (anti-eco)")
-                    }
                 }
             }
             State.TTS_PAUSED -> {
@@ -1101,12 +1514,11 @@ class VocaliaCore(
                 when (parsed) {
                     is CommandResult.ResumeTts -> {
                         log("TTS_PAUSED: reanudar")
-                        if (ttsManager.resumePaused(
+                        if (!ttsManager.resumePaused(
                                 onStart = { enterTtsSpeaking() },
-                                onComplete = { if (state == State.TTS_SPEAKING) resumeListeningWithDelay() }
-                            )) {
-                            // resumePaused ya lanzó el hilo; el estado pasa a TTS_SPEAKING vía onStart
-                        } else {
+                                onComplete = {
+                                    if (state == State.TTS_SPEAKING) resumeListeningWithDelay()
+                                })) {
                             log("TTS_PAUSED: no había nada que reanudar")
                             enterIdle()
                         }
@@ -1128,6 +1540,10 @@ class VocaliaCore(
         }
     }
 
+    // ----------------------------------------------------------------
+    // Ejecución de comandos
+    // ----------------------------------------------------------------
+
     private fun handleCommand(text: String, returnTo: State) {
         log("handleCommand: \"$text\" returnTo=$returnTo")
         if (ttsManager.isSpeaking()) {
@@ -1135,24 +1551,28 @@ class VocaliaCore(
             ttsManager.stop()
         }
         val parsed = commandParser.parse(text)
-        val forceIdle = parsed is CommandResult.Sleep || parsed is CommandResult.ExitContinuous
+        val forceIdle = parsed is CommandResult.Sleep
+            || parsed is CommandResult.ExitContinuous
+            || parsed is CommandResult.ExitUiMode
         enterExecuting(if (forceIdle) State.IDLE else returnTo)
 
         when (parsed) {
-            CommandResult.Sleep -> speakAndReturn("descanso") { enterIdle() }
-            CommandResult.ExitContinuous -> speakAndReturn("escucha continua desactivada") { enterIdle() }
-            CommandResult.EnterContinuous -> speakAndReturn("escucha continua activada") { enterContinuous() }
-            CommandResult.PauseTts -> { log("PauseTts fuera de TTS_SPEAKING, ignorado"); afterExecution() }
+            CommandResult.Sleep ->
+                speakAndReturn("descanso") { enterIdle() }
+            CommandResult.ExitContinuous ->
+                speakAndReturn("escucha continua desactivada") { enterIdle() }
+            CommandResult.EnterContinuous ->
+                speakAndReturn("escucha continua activada") { enterContinuous() }
+            CommandResult.PauseTts -> {
+                log("PauseTts fuera de TTS_SPEAKING, ignorado")
+                afterExecution()
+            }
             CommandResult.ResumeTts -> {
-                // Si llegamos aquí sin estar en TTS_PAUSED pero hay lectura pendiente, reanudamos.
                 if (ttsManager.hasPausedSpeech()) {
                     log("ResumeTts con buffer pendiente: reanudando")
-                    if (ttsManager.resumePaused(
+                    if (!ttsManager.resumePaused(
                             onStart = { enterTtsSpeaking() },
-                            onComplete = { if (state == State.TTS_SPEAKING) resumeListeningWithDelay() }
-                        )) {
-                        // onStart ya cambió el estado
-                    } else {
+                            onComplete = { if (state == State.TTS_SPEAKING) resumeListeningWithDelay() })) {
                         log("ResumeTts: resumePaused falló, ignorado")
                         afterExecution()
                     }
@@ -1169,7 +1589,7 @@ class VocaliaCore(
                 val all = appLauncher.getAllAppsForTTS()
                 log("ListApps: ${all.size} apps")
                 val msg = if (all.isEmpty()) "no tengo apps instaladas"
-                else "tengo ${all.size} apps instaladas. Son: ${all.joinToString(", ")}"
+                          else "tengo ${all.size} apps instaladas. Son: ${all.joinToString(", ")}"
                 speakAndReturn(msg) { afterExecution() }
             }
             CommandResult.ListAppsVerbose -> {
@@ -1181,10 +1601,11 @@ class VocaliaCore(
                     else log("ListAppsVerbose:   - $app (di: ${aliases.joinToString(" / ")})")
                 }
                 val msg = if (all.isEmpty()) "no tengo apps instaladas"
-                else "tengo ${all.size} apps instaladas. Son: ${all.joinToString(", ")}"
+                          else "tengo ${all.size} apps instaladas. Son: ${all.joinToString(", ")}"
                 speakAndReturn(msg) { afterExecution() }
             }
-            is CommandResult.Response -> speakAndReturn(parsed.text) { afterExecution() }
+            is CommandResult.Response ->
+                speakAndReturn(parsed.text) { afterExecution() }
             is CommandResult.SetVoiceMode -> {
                 if (parsed.intelligent) {
                     ttsManager.speak("cargando voz inteligente",
@@ -1240,10 +1661,48 @@ class VocaliaCore(
                 appLauncher.bringVocaliaToFront()
                 speakAndReturn("cerrando app actual") { afterExecution() }
             }
+
+            // ============================================================
+            // Modo usar
+            // ============================================================
+            CommandResult.EnterUiMode -> {
+                val svc = VocaliaAccessibilityService.instance
+                if (svc == null) {
+                    log("EnterUiMode: accesibilidad no disponible")
+                    speakAndReturn("servicio de accesibilidad no disponible, actívalo en ajustes") {
+                        enterIdle()
+                    }
+                } else {
+                    log("EnterUiMode: activando modo usar")
+                    speakAndReturn("modo usar activado") { enterUiNavigation() }
+                }
+            }
+            CommandResult.ExitUiMode -> {
+                log("ExitUiMode")
+                speakAndReturn("modo usar desactivado") { enterIdle() }
+            }
+            CommandResult.UiNext     -> a11yCommand { it.nextNode() }
+            CommandResult.UiPrevious -> a11yCommand { it.previousNode() }
+            CommandResult.UiRead     -> a11yCommand { it.readCurrentNode() }
+            CommandResult.UiClick    -> a11yCommand { it.clickCurrentNode() }
+            CommandResult.UiBack     -> a11yCommand { it.performBack() }
+            CommandResult.UiPaste    -> a11yCommand { it.pasteClipboard() }
+            is CommandResult.UiScroll -> {
+                val dir = when (parsed.direction) {
+                    CommandResult.UiDirection.UP    -> VocaliaAccessibilityService.ScrollDirection.UP
+                    CommandResult.UiDirection.DOWN  -> VocaliaAccessibilityService.ScrollDirection.DOWN
+                    CommandResult.UiDirection.LEFT  -> VocaliaAccessibilityService.ScrollDirection.LEFT
+                    CommandResult.UiDirection.RIGHT -> VocaliaAccessibilityService.ScrollDirection.RIGHT
+                }
+                a11yCommand { it.scroll(dir) }
+            }
         }
     }
 
-    /** Matches wake word only at START of text. Returns (hasWake, remainder). */
+    // ----------------------------------------------------------------
+    // Utilidades
+    // ----------------------------------------------------------------
+
     private fun extractWake(text: String): Pair<Boolean, String> {
         val lower = text.lowercase().trim()
         for (w in WAKE_WORDS) {
@@ -1263,9 +1722,9 @@ class VocaliaCore(
         timeoutRunnable?.let { mainHandler.removeCallbacks(it) }; timeoutRunnable = null
         safetyRunnable?.let { mainHandler.removeCallbacks(it) }; safetyRunnable = null
         resumeRunnable?.let { mainHandler.removeCallbacks(it) }; resumeRunnable = null
+        uiTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }; uiTimeoutRunnable = null
     }
 }
-
 ===== app/src/main/java/io/github/stringmanolo/vocalia/core/AppLauncher.kt =====
 package io.github.stringmanolo.vocalia.core
 

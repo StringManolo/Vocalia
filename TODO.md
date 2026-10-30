@@ -2,6 +2,10 @@
 
 Cosas concretas que añadir/parchear/evaluar.
 
+### Ciberseguridad
+##### Vulnerabilidades Conocidas
+- Audios en speaker pueden atacar a la app. Por ejemplo si te mandan un audio por Telegram, pueden instruir a Vocalia que hacer. (necesario pensar en solución robusta que no tenga workarounds sin limitar la app)
+
 ### Fase siguiente
 Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
 
@@ -16,6 +20,8 @@ Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
 3 Sistema de dictado (te relee lo que llevar escrito y demás. Básicamente es como vi/vim pero interno por voz, y una vez confirmado te permite usar el texto por etiquetas). Por ejemplo: Pega el texto1. Pega el Texto2. Lee el texto2. Borra el texto2. Edita el Texto1. ...
 
 #### general
+
+- Añadir atajos al modo USAR por app. Estos atajos deben poder crearse dinámicamente / por app. por ejemplo app-shortcuts-telegram.voc.json. Dentro van gramaticas y atajos de accesibilitu, rollo: Abrir chat "Escribir", abre el chat llamado Escribir (toggle 3 veces siguiente, etc. Lo que corresponda. Estos deben poder editarse live. Por ejemplo que se creen en una carpeta publica accesible y se cargen en caliente. Asi el usuario final puede editarlos, añadir nuevos, borrarlos, etc, sin tener que reinstalar la app. En el futuro permitir editar estos archivos por voz, cuando se añada el modo dictado.
 
 - Avisar de chuncks largos (para que el usuario sepa que el tts continua) o usar chunks exactos para tts.
 

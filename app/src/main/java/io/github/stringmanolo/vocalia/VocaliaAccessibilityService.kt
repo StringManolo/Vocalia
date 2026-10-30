@@ -69,7 +69,8 @@ class VocaliaAccessibilityService : AccessibilityService() {
      * Recorre el árbol de la ventana activa (BFS) y construye una lista con
      * los nodos visibles que son interactuables o contienen texto.
      */
-    fun refreshNodeList() {
+    fun refreshNodeList(preserveIndex: Boolean = false) {
+        val previousIndex = currentIndex
         val root = rootInActiveWindow
         if (root == null) {
             interactiveNodes = emptyList()
@@ -98,7 +99,11 @@ class VocaliaAccessibilityService : AccessibilityService() {
         }
 
         interactiveNodes = result
-        currentIndex = if (result.isNotEmpty()) 0 else -1
+        currentIndex = when {
+            result.isEmpty() -> -1
+            preserveIndex && previousIndex >= 0 -> previousIndex.coerceAtMost(result.size - 1)
+            else -> 0
+        }
         dbg("refreshNodeList: ${result.size} nodos, index=$currentIndex")
     }
 
@@ -149,15 +154,33 @@ class VocaliaAccessibilityService : AccessibilityService() {
         return desc
     }
 
+    /**
+     * Si el nodo actual ya no es válido (la pantalla cambió), reconstruye la
+     * lista conservando la posición, en vez de volver al principio.
+     */
+    private fun ensureListIsFresh() {
+        if (interactiveNodes.isEmpty()) {
+            refreshNodeList()
+            return
+        }
+        val node = getCurrentNode()
+        if (node != null && !node.refresh()) {
+            dbg("nodo actual obsoleto, refrescando lista conservando posición")
+            refreshNodeList(preserveIndex = true)
+        }
+    }
+
+    /** Mueve la selección al elemento siguiente (circular) y lo anuncia. */
     fun nextNode(): String {
-        if (interactiveNodes.isEmpty()) refreshNodeList()
+        ensureListIsFresh()
         if (interactiveNodes.isEmpty()) return "no hay elementos"
         currentIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % interactiveNodes.size
         return readCurrentNode()
     }
 
+    /** Mueve la selección al elemento anterior (circular) y lo anuncia. */
     fun previousNode(): String {
-        if (interactiveNodes.isEmpty()) refreshNodeList()
+        ensureListIsFresh()
         if (interactiveNodes.isEmpty()) return "no hay elementos"
         currentIndex = if (currentIndex <= 0) interactiveNodes.size - 1 else currentIndex - 1
         return readCurrentNode()
@@ -182,7 +205,6 @@ class VocaliaAccessibilityService : AccessibilityService() {
     fun performBack(): String {
         val ok = performGlobalAction(GLOBAL_ACTION_BACK)
         dbg("back -> ok=$ok")
-        refreshNodeList()
         return if (ok) "atrás" else "no se pudo volver atrás"
     }
 
@@ -197,7 +219,6 @@ class VocaliaAccessibilityService : AccessibilityService() {
         }
         val ok = node.performAction(action)
         dbg("scroll $direction -> ok=$ok (nodo=${node.className})")
-        refreshNodeList()
         return if (ok) "desplazado" else "no se pudo desplazar"
     }
 

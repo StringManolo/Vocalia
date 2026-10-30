@@ -16,6 +16,7 @@ FILES=(
   app/src/main/java/io/github/stringmanolo/vocalia/core/AppLauncher.kt
   app/src/main/java/io/github/stringmanolo/vocalia/tts/TtsManager.kt
   app/src/main/java/io/github/stringmanolo/vocalia/tts/TtsEngine.kt
+
 )
 
 for f in "${FILES[@]}"; do
