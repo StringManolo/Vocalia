@@ -16,7 +16,6 @@ class VocaliaCore(
     private enum class State { IDLE, LISTENING, EXECUTING, CONTINUOUS, TTS_SPEAKING, TTS_PAUSED }
 
     companion object {
-        /** Wake words: lo que Vosk transcribe de "vocalia" + variantes. */
         val WAKE_WORDS = listOf(
             "boca lía", "boca lia", "bocalia", "vocalía", "vocalia"
         )
@@ -58,6 +57,12 @@ class VocaliaCore(
     private var safetyRunnable: Runnable? = null
     private var resumeRunnable: Runnable? = null
 
+    /**
+     * Si es true, Vosk se detiene por completo (deja de escuchar) hasta que el TTS termine.
+     * Es exclusivo para "Ayuda": mientras dura, no se procesa ningún resultado de voz.
+     */
+    @Volatile private var isBlockingHelp = false
+
     private val resumeDelayMs = 10L
     private val listeningTimeoutMs = 5_000L
     private val safetyTimeoutMs = 600_000L
@@ -89,6 +94,7 @@ class VocaliaCore(
     private fun enterIdle(speak: String? = null) {
         log("enterIdle")
         state = State.IDLE
+        isBlockingHelp = false
         cancelTimeouts()
         voskEngine.stopListening()
         voskEngine.setGrammar(fullGrammar)
@@ -104,6 +110,7 @@ class VocaliaCore(
     private fun enterContinuous(speak: String? = null) {
         log("enterContinuous")
         state = State.CONTINUOUS
+        isBlockingHelp = false
         cancelTimeouts()
         voskEngine.stopListening()
         voskEngine.setGrammar(fullGrammar)
@@ -176,7 +183,8 @@ class VocaliaCore(
 
     private fun resumeListeningWithDelay() {
         resumeRunnable = Runnable {
-            if (state != State.EXECUTING && state != State.TTS_SPEAKING && state != State.TTS_PAUSED) {
+            if (state != State.EXECUTING && state != State.TTS_SPEAKING &&
+                state != State.TTS_PAUSED && !isBlockingHelp) {
                 voskEngine.startListening()
                 log("Vosk reanudado tras ${resumeDelayMs}ms (state=$state)")
             }
@@ -194,9 +202,41 @@ class VocaliaCore(
             })
     }
 
+    /**
+     * Reproduce el TTS bloqueando completamente Vosk mientras dura. Se usa para "Ayuda".
+     * Mientras `isBlockingHelp` sea true, Vosk no escucha y no procesa nada.
+     */
+    private fun speakBlocking(text: String, after: () -> Unit) {
+        isBlockingHelp = true
+        cancelTimeouts()
+        voskEngine.stopListening()
+        log("Vosk detenido por TTS bloqueante (Ayuda)")
+
+        state = State.TTS_SPEAKING
+        ttsManager.speak(
+            text,
+            onStart = {
+                // Estado ya marcado; Vosk permanece detenido
+                log("TTS bloqueante en curso")
+            },
+            onComplete = {
+                isBlockingHelp = false
+                state = State.EXECUTING
+                after()
+            }
+        )
+    }
+
     private fun handleResult(json: String) {
         val text = extractText(json)
         if (text.isBlank() || text == "[unk]") return
+
+        // Si estamos reproduciendo la Ayuda, ignoramos cualquier resultado de voz.
+        if (isBlockingHelp) {
+            log("result: \"$text\" IGNORADO (isBlockingHelp)")
+            return
+        }
+
         log("result: \"$text\" (state=$state)")
 
         when (state) {
@@ -254,8 +294,15 @@ class VocaliaCore(
                 when (parsed) {
                     is CommandResult.ResumeTts -> {
                         log("TTS_PAUSED: reanudar")
-                        ttsManager.resume()
-                        enterTtsSpeaking()
+                        if (ttsManager.resumePaused(
+                                onStart = { enterTtsSpeaking() },
+                                onComplete = { if (state == State.TTS_SPEAKING) resumeListeningWithDelay() }
+                            )) {
+                            // resumePaused ya lanzó el hilo; el estado pasa a TTS_SPEAKING vía onStart
+                        } else {
+                            log("TTS_PAUSED: no había nada que reanudar")
+                            enterIdle()
+                        }
                     }
                     CommandResult.Sleep, is CommandResult.ExitContinuous -> {
                         log("TTS_PAUSED: cancelar")
@@ -264,6 +311,7 @@ class VocaliaCore(
                     }
                     else -> {
                         log("TTS_PAUSED: comando nuevo, se abandona la lectura pausada")
+                        ttsManager.clearPausedSpeech()
                         ttsManager.stop()
                         handleCommand(command, State.IDLE)
                     }
@@ -288,10 +336,27 @@ class VocaliaCore(
             CommandResult.ExitContinuous -> speakAndReturn("escucha continua desactivada") { enterIdle() }
             CommandResult.EnterContinuous -> speakAndReturn("escucha continua activada") { enterContinuous() }
             CommandResult.PauseTts -> { log("PauseTts fuera de TTS_SPEAKING, ignorado"); afterExecution() }
-            CommandResult.ResumeTts -> { log("ResumeTts fuera de TTS_PAUSED, ignorado"); afterExecution() }
+            CommandResult.ResumeTts -> {
+                // Si llegamos aquí sin estar en TTS_PAUSED pero hay lectura pendiente, reanudamos.
+                if (ttsManager.hasPausedSpeech()) {
+                    log("ResumeTts con buffer pendiente: reanudando")
+                    if (ttsManager.resumePaused(
+                            onStart = { enterTtsSpeaking() },
+                            onComplete = { if (state == State.TTS_SPEAKING) resumeListeningWithDelay() }
+                        )) {
+                        // onStart ya cambió el estado
+                    } else {
+                        log("ResumeTts: resumePaused falló, ignorado")
+                        afterExecution()
+                    }
+                } else {
+                    log("ResumeTts fuera de TTS_PAUSED, ignorado")
+                    afterExecution()
+                }
+            }
             CommandResult.Help -> {
-                log("Help solicitado")
-                speakAndReturn(HELP_TEXT) { afterExecution() }
+                log("Help solicitado (bloqueante, Vosk detenido)")
+                speakBlocking(HELP_TEXT) { afterExecution() }
             }
             CommandResult.ListApps -> {
                 val all = appLauncher.getAllAppsForTTS()

@@ -2,6 +2,8 @@
 
 Cosas concretas que añadir/parchear/evaluar.
 
+- Avisar de chuncks largos (para que el usuario sepa que el tts continua) o usar chunks exactos para tts.
+
 - Testear autonicio tras reboot una vez instalada y configurada (que funcione sin problemas, testear esto también en android moderno)
 
 - Añadir mensaje de bienvenida corto a vocalia indicando que se cambia a voz inteligente. Cuando se cambia a Voz inteligente por primera vez, mensaje de bienvenida completo (solo una vez por instalación), indicando como usar el software por voz)
