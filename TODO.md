@@ -16,7 +16,13 @@ Cosas concretas que añadir/parchear/evaluar.
 
 - Añadir confirmación robusta (con pin opcional) para tareas sensitivas. (Modo Root, similar a como funciona SUDO y SUDO SU en Linux)
 
+- Añadir "repite el último mensaje/tts"
+
 - Test other voices
+
+- Que el TTS lea los alias en viz alto para las apps instaladas
+
+- Que permits añadir apps con alias al listado (dificil)
 
 - Grammar in 1 place (fuck spaguetti)
 

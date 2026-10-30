@@ -23,6 +23,7 @@ class AppLauncher(private val context: Context) {
         // Navegadores
         "chrome" to listOf("com.android.chrome"),
         "navegador" to listOf("com.android.chrome", "org.mozilla.firefox", "com.brave.browser"),
+        "navegador web" to listOf("com.android.chrome", "org.mozilla.firefox", "com.brave.browser"),
         "firefox" to listOf("org.mozilla.firefox"),
         "fennec" to listOf("org.mozilla.fennec_fdroid"),
         "brave" to listOf("com.brave.browser"),
@@ -38,16 +39,21 @@ class AppLauncher(private val context: Context) {
         // Cámara / fotos
         "camara" to listOf("com.android.camera", "com.huawei.camera"),
         "camera" to listOf("com.android.camera", "com.huawei.camera"),
+        "cam" to listOf("com.android.camera", "com.huawei.camera"),
         "foto" to listOf("com.android.camera", "com.huawei.camera"),
+        "camara foto" to listOf("com.android.camera", "com.huawei.camera"),
         "galeria" to listOf("com.android.gallery3d", "com.huawei.photos"),
         "gallery" to listOf("com.android.gallery3d", "com.huawei.photos"),
+        "gal" to listOf("com.android.gallery3d", "com.huawei.photos"),
         "fotos" to listOf("com.android.gallery3d", "com.huawei.photos", "com.google.android.apps.photos"),
         "photos" to listOf("com.android.gallery3d", "com.huawei.photos"),
         "photoeditor" to listOf("com.iudesk.android.photo.editor"),
+        "editor" to listOf("com.iudesk.android.photo.editor"),
 
         // Sistema
         "ajustes" to listOf("com.android.settings"),
         "configuracion" to listOf("com.android.settings"),
+        "config" to listOf("com.android.settings"),
         "settings" to listOf("com.android.settings"),
         "contactos" to listOf("com.android.contacts", "com.huawei.contacts"),
         "contacts" to listOf("com.android.contacts", "com.huawei.contacts"),
@@ -57,6 +63,7 @@ class AppLauncher(private val context: Context) {
         "marcador" to listOf("com.android.dialer", "com.huawei.contacts"),
         "calculadora" to listOf("com.android.calculator2", "com.huawei.calculator", "com.google.android.calculator"),
         "calculator" to listOf("com.android.calculator2", "com.huawei.calculator", "com.google.android.calculator"),
+        "calcu" to listOf("com.android.calculator2", "com.huawei.calculator", "com.google.android.calculator"),
         "reloj" to listOf("com.android.deskclock", "com.huawei.deskclock"),
         "clock" to listOf("com.android.deskclock", "com.huawei.deskclock"),
         "alarma" to listOf("com.android.deskclock", "com.huawei.deskclock"),
@@ -68,11 +75,9 @@ class AppLauncher(private val context: Context) {
         "archivos" to listOf("com.android.documentsui", "com.huawei.hidisk"),
         "files" to listOf("com.android.documentsui", "com.huawei.hidisk"),
 
-        // Mapas
+        // Mapas / correo
         "maps" to listOf("com.google.android.apps.maps", "com.huawei.maps"),
         "mapas" to listOf("com.google.android.apps.maps", "com.huawei.maps"),
-
-        // Correo
         "gmail" to listOf("com.google.android.gm"),
         "correo" to listOf("com.google.android.gm", "com.huawei.email"),
         "email" to listOf("com.google.android.gm", "com.huawei.email"),
@@ -82,7 +87,7 @@ class AppLauncher(private val context: Context) {
         "fdroid" to listOf("org.fdroid.fdroid"),
         "appgallery" to listOf("com.huawei.appmarket"),
 
-        // Apps del usuario con nombres no reconocibles por Vosk
+        // Apps del usuario con nombres no reconocibles por Vosk small
         "anki" to listOf("com.ichi2.anki"),
         "ankidroid" to listOf("com.ichi2.anki"),
         "setedit" to listOf("io.github.muntashirakon.setedit"),
@@ -94,15 +99,19 @@ class AppLauncher(private val context: Context) {
         "apkexport" to listOf("com.stringmanolo.apkexport"),
         "hackerskeyboard" to listOf("org.pocketworkstation.pckeyboard"),
         "keyboard" to listOf("org.pocketworkstation.pckeyboard", "com.touchtype.swiftkey"),
+        "teclado" to listOf("org.pocketworkstation.pckeyboard", "com.touchtype.swiftkey"),
         "floatingvolume" to listOf("floatingvolumecontrol.io.github.stringmanolo"),
         "volumen" to listOf("floatingvolumecontrol.io.github.stringmanolo"),
         "screenrecorder" to listOf("com.kimcy929.screenrecorder"),
         "grabador" to listOf("com.kimcy929.screenrecorder"),
+        "grabador pantalla" to listOf("com.kimcy929.screenrecorder"),
         "proton" to listOf("ch.protonvpn.android"),
         "protonvpn" to listOf("ch.protonvpn.android"),
         "vpn" to listOf("ch.protonvpn.android"),
         "vocalia" to listOf("io.github.stringmanolo.vocalia", "io.github.stringmanolo.vocalia.debug"),
         "office" to listOf("com.microsoft.office.officehubrow"),
+        // ALIAS FONÉTICO para Termux: Vosk small no reconoce "termux"
+        "terminal" to listOf("com.termux"),
         "termux" to listOf("com.termux"),
         "filmora" to listOf("com.wondershare.filmorago"),
         "filmorago" to listOf("com.wondershare.filmorago"),
@@ -118,13 +127,16 @@ class AppLauncher(private val context: Context) {
         apps.sortedBy { it.first.lowercase() }.forEach { (label, pkg) ->
             InternalDebug.mark("AppLauncher:   - $label ($pkg)")
         }
+        InternalDebug.mark("AppLauncher: ${knownApps.size} aliases en knownApps")
     }
 
     fun getAllInstalledAppNames(): List<String> =
         getInstalledApps().map { it.first.lowercase() }.distinct().sorted()
 
-    fun getTopAppsForTTS(limit: Int = 200): List<String> =
-        getInstalledApps().map { it.first }.distinct().sorted().take(limit)
+    fun getAllAppsForTTS(): List<String> =
+        getInstalledApps().map { it.first }.distinct().sorted()
+
+    fun getKnownAliases(): Set<String> = knownApps.keys
 
     fun hasApp(name: String): Boolean {
         val query = normalize(name)
@@ -160,12 +172,14 @@ class AppLauncher(private val context: Context) {
         val query = normalize(appName)
         InternalDebug.mark("AppLauncher: launch(\"$appName\") norm=\"$query\"")
 
+        // 1. Curado
         val curated = knownApps[query]
         if (curated != null) {
             for (pkg in curated) if (launchPackage(pkg)) return Result.Ok(appName)
             InternalDebug.mark("AppLauncher: curado \"$query\" sin match instalado")
         }
 
+        // 2. Match por label normalizado (exacto, prefijo, palabra)
         val apps = getInstalledApps()
         InternalDebug.mark("AppLauncher: ${apps.size} apps (caché)")
         val normalizedApps = apps.map { normalize(it.first) to it }

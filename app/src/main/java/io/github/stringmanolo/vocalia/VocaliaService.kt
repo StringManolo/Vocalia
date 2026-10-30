@@ -38,8 +38,9 @@ class VocaliaService : Service() {
         appLauncher = AppLauncher(this)
         appLauncher.preload()
         val appNames = appLauncher.getAllInstalledAppNames()
-        InternalDebug.mark("Service: ${appNames.size} apps instaladas")
-        val grammar = buildGrammar(appNames)
+        val aliases = appLauncher.getKnownAliases()
+        InternalDebug.mark("Service: ${appNames.size} apps, ${aliases.size} aliases")
+        val grammar = buildGrammar(appNames, aliases)
         InternalDebug.mark("Service: grammar de ${grammar.length} chars")
 
         ttsManager = TtsManager(this)
@@ -59,7 +60,7 @@ class VocaliaService : Service() {
         ttsManager.init()
     }
 
-    private fun buildGrammar(appNames: List<String>): String {
+    private fun buildGrammar(appNames: List<String>, aliases: Set<String>): String {
         val commands = mutableListOf(
             "asistente", "asistentes",
             "que hora es", "que hora", "la hora", "hora es",
@@ -74,24 +75,45 @@ class VocaliaService : Service() {
             "continua el tts", "continua el texto", "continua la lectura", "continua lectura", "continua voz",
             "reanuda el tts", "reanuda la lectura", "sigue leyendo",
             "lista apps", "lista de apps", "que apps tengo", "lista de aplicaciones",
-            "listame las apps", "lista de apps disponibles", "todas las apps"
+            "listame las apps", "lista de apps disponibles", "todas las apps", "todas las aplicaciones"
         )
-        // Solo dos prefijos: abre / abrir. Gramática reducida ~120 entradas vs ~340 antes.
-        val prefixes = listOf("abre", "abrir")
-        for (app in appNames) {
-            val original = app.replace("\"", "").replace("\\", "").trim()
-            if (original.isBlank()) continue
-            for (p in prefixes) commands.add("$p $original")
 
-            val sinTildes = Normalizer.normalize(original, Normalizer.Form.NFD)
-                .replace("\\p{Mn}+".toRegex(), "")
-            if (sinTildes != original && sinTildes.isNotBlank()) {
-                for (p in prefixes) commands.add("$p $sinTildes")
+        val added = mutableSetOf<String>()
+
+        fun addUnique(s: String) {
+            if (s.isNotBlank() && added.add(s)) commands.add(s)
+        }
+
+        // Nombres de apps: "X" (si 1-2 palabras) y "abre X"
+        for (app in appNames) {
+            val clean = app.replace("\"", "").replace("\\", "").trim()
+            if (clean.isBlank()) continue
+            val words = clean.split("\\s+".toRegex())
+            if (words.size <= 2) addUnique(clean)
+            addUnique("abre $clean")
+
+            val sinTildes = normalize(clean)
+            if (sinTildes != clean && sinTildes.isNotBlank()) {
+                if (words.size <= 2) addUnique(sinTildes)
+                addUnique("abre $sinTildes")
             }
         }
+
+        // Aliases manuales: "alias" y "abre alias"
+        for (alias in aliases) {
+            val clean = alias.replace("\"", "").replace("\\", "").trim()
+            if (clean.isBlank()) continue
+            addUnique(clean)
+            addUnique("abre $clean")
+        }
+
         commands.add("[unk]")
         return commands.joinToString(",", "[", "]") { "\"$it\"" }
     }
+
+    private fun normalize(s: String): String =
+        Normalizer.normalize(s.lowercase().trim(), Normalizer.Form.NFD)
+            .replace("\\p{Mn}+".toRegex(), "")
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()

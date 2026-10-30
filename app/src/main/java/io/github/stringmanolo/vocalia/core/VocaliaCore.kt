@@ -32,10 +32,9 @@ class VocaliaCore(
     private var safetyRunnable: Runnable? = null
     private var resumeRunnable: Runnable? = null
 
-    // Reducido a 10 ms: el delay(100) del playAudio ya cubre la cola física del AudioTrack
     private val resumeDelayMs = 10L
     private val listeningTimeoutMs = 5_000L
-    private val safetyTimeoutMs = 30_000L
+    private val safetyTimeoutMs = 600_000L // 10 min para lecturas muy largas
 
     fun start(grammar: String) {
         log("start")
@@ -55,8 +54,6 @@ class VocaliaCore(
         voskEngine.stopListening()
         ttsManager.stop()
     }
-
-    // --- Estados ---
 
     private fun enterIdle(speak: String? = null) {
         log("enterIdle")
@@ -166,8 +163,6 @@ class VocaliaCore(
             })
     }
 
-    // --- Eventos ---
-
     private fun handleResult(json: String) {
         val text = extractText(json)
         if (text.isBlank() || text == "[unk]") return
@@ -250,14 +245,14 @@ class VocaliaCore(
             CommandResult.PauseTts -> { log("PauseTts fuera de TTS_SPEAKING, ignorado"); afterExecution() }
             CommandResult.ResumeTts -> { log("ResumeTts fuera de TTS_PAUSED, ignorado"); afterExecution() }
             CommandResult.ListApps -> {
-                val all = appLauncher.getAllInstalledAppNames()
-                val top = appLauncher.getTopAppsForTTS(10)
+                val all = appLauncher.getAllAppsForTTS()
+                log("ListApps: ${all.size} apps")
                 val msg = if (all.isEmpty()) "no tengo apps instaladas"
-                else "tengo ${all.size} apps, por ejemplo: ${top.joinToString(", ")}"
+                else "tengo ${all.size} apps instaladas. Son: ${all.joinToString(", ")}"
                 speakAndReturn(msg) { afterExecution() }
             }
             CommandResult.ListAppsVerbose -> {
-                val all = appLauncher.getTopAppsForTTS(200)
+                val all = appLauncher.getAllAppsForTTS()
                 log("ListAppsVerbose: ${all.size} apps")
                 all.forEach { log("ListAppsVerbose:   - $it") }
                 val msg = if (all.isEmpty()) "no tengo apps instaladas"
@@ -311,11 +306,8 @@ class VocaliaCore(
     } catch (_: Exception) { "" }
 
     private fun cancelTimeouts() {
-        timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        timeoutRunnable = null
-        safetyRunnable?.let { mainHandler.removeCallbacks(it) }
-        safetyRunnable = null
-        resumeRunnable?.let { mainHandler.removeCallbacks(it) }
-        resumeRunnable = null
+        timeoutRunnable?.let { mainHandler.removeCallbacks(it) }; timeoutRunnable = null
+        safetyRunnable?.let { mainHandler.removeCallbacks(it) }; safetyRunnable = null
+        resumeRunnable?.let { mainHandler.removeCallbacks(it) }; resumeRunnable = null
     }
 }
