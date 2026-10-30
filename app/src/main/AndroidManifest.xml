@@ -3,7 +3,6 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="io.github.stringmanolo.vocalia">
 
-    <!-- Permisos base -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -11,16 +10,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!--
-        QUERY_ALL_PACKAGES: necesario para ver todas las apps instaladas en Android 11+.
-        Sin esto, queryIntentActivities devuelve solo las apps "visibles" para la app.
-        Como asistente de accesibilidad, es un caso de uso legítimo.
-    -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
-    <!-- Queries para apps con launcher -->
+    <!-- Imprescindible para startActivity desde background en Android 10+ -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -37,22 +32,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.HelloWorld">
 
-        <!-- Activity principal -->
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Visor de logs -->
-        <activity
-            android:name=".LogActivity"
-            android:exported="false" />
+        <activity android:name=".LogActivity" android:exported="false" />
 
-        <!-- Servicio principal en primer plano -->
         <service
             android:name=".VocaliaService"
             android:exported="false"
@@ -62,7 +50,6 @@
                 android:value="voice_assistant_service" />
         </service>
 
-        <!-- Servicio de accesibilidad (stub, Fase 2) -->
         <service
             android:name=".VocaliaAccessibilityService"
             android:exported="true"
@@ -75,10 +62,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Arranque al encender -->
-        <receiver
-            android:name=".BootReceiver"
-            android:exported="true">
+        <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
@@ -86,10 +70,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- Watchdog periódico -->
-        <receiver
-            android:name=".WatchdogReceiver"
-            android:exported="false" />
-
+        <receiver android:name=".WatchdogReceiver" android:exported="false" />
     </application>
 </manifest>

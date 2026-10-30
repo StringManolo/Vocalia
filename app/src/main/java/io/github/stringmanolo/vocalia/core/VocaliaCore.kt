@@ -32,7 +32,8 @@ class VocaliaCore(
     private var safetyRunnable: Runnable? = null
     private var resumeRunnable: Runnable? = null
 
-    private val resumeDelayMs = 1_200L
+    // Reducido a 10 ms: el delay(100) del playAudio ya cubre la cola física del AudioTrack
+    private val resumeDelayMs = 10L
     private val listeningTimeoutMs = 5_000L
     private val safetyTimeoutMs = 30_000L
 
@@ -149,7 +150,7 @@ class VocaliaCore(
         resumeRunnable = Runnable {
             if (state != State.EXECUTING && state != State.TTS_SPEAKING && state != State.TTS_PAUSED) {
                 voskEngine.startListening()
-                log("Vosk reanudado tras delay (state=$state)")
+                log("Vosk reanudado tras ${resumeDelayMs}ms (state=$state)")
             }
         }.also { mainHandler.postDelayed(it, resumeDelayMs) }
     }
@@ -253,6 +254,14 @@ class VocaliaCore(
                 val top = appLauncher.getTopAppsForTTS(10)
                 val msg = if (all.isEmpty()) "no tengo apps instaladas"
                 else "tengo ${all.size} apps, por ejemplo: ${top.joinToString(", ")}"
+                speakAndReturn(msg) { afterExecution() }
+            }
+            CommandResult.ListAppsVerbose -> {
+                val all = appLauncher.getTopAppsForTTS(200)
+                log("ListAppsVerbose: ${all.size} apps")
+                all.forEach { log("ListAppsVerbose:   - $it") }
+                val msg = if (all.isEmpty()) "no tengo apps instaladas"
+                else "tengo ${all.size} apps instaladas. Son: ${all.joinToString(", ")}"
                 speakAndReturn(msg) { afterExecution() }
             }
             is CommandResult.Response -> speakAndReturn(parsed.text) { afterExecution() }

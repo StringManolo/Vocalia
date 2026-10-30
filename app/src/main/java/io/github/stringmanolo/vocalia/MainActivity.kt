@@ -12,11 +12,18 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private const val REQ_NOTIFICATIONS = 200
+        private const val REQ_RECORD_AUDIO = 201
+        private const val REQ_OVERLAY = 202
+    }
 
     private lateinit var statusText: TextView
 
@@ -27,29 +34,24 @@ class MainActivity : AppCompatActivity() {
         statusText = findViewById(R.id.statusText)
 
         requestIgnoreBatteryOptimizations()
-        requestRecordAudioPermissionIfNeeded()
+        requestNotificationsIfNeeded()
+        requestRecordAudioIfNeeded()
+        requestOverlayIfNeeded()
 
-        val startButton = findViewById<Button>(R.id.startButton)
-        val stopButton  = findViewById<Button>(R.id.stopButton)
-        findViewById<Button>(R.id.showLogsButton).setOnClickListener {
-          startActivity(Intent(this, LogActivity::class.java))
-        }
-
-        startButton.setOnClickListener {
-          val intent = Intent(this, VocaliaService::class.java)
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
+        findViewById<Button>(R.id.startButton).setOnClickListener {
+            val intent = Intent(this, VocaliaService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+            else startService(intent)
             statusText.postDelayed({ updateStatus() }, 300)
         }
-        stopButton.setOnClickListener {
+        findViewById<Button>(R.id.stopButton).setOnClickListener {
             stopService(Intent(this, VocaliaService::class.java))
             statusText.postDelayed({ updateStatus() }, 300)
         }
+        findViewById<Button>(R.id.showLogsButton).setOnClickListener {
+            startActivity(Intent(this, LogActivity::class.java))
+        }
 
-        requestNotificationPermissionIfNeeded()
         updateStatus()
     }
 
@@ -68,38 +70,39 @@ class MainActivity : AppCompatActivity() {
     private fun requestIgnoreBatteryOptimizations() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
-            }
-            startActivity(intent)
+            })
         }
     }
 
-    private fun requestRecordAudioPermissionIfNeeded() {
-    if (androidx.core.content.ContextCompat.checkSelfPermission(
-            this, android.Manifest.permission.RECORD_AUDIO
-        ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-    ) {
-        androidx.core.app.ActivityCompat.requestPermissions(
-            this,
-            arrayOf(android.Manifest.permission.RECORD_AUDIO),
-            201
-        )
+    private fun requestNotificationsIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICATIONS)
+        }
     }
-}
 
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    200
-                )
-            }
+    private fun requestRecordAudioIfNeeded() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                arrayOf(Manifest.permission.RECORD_AUDIO), REQ_RECORD_AUDIO)
+        }
+    }
+
+    private fun requestOverlayIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this,
+                "Concede 'Dibujar sobre otras apps' para que Vocalia pueda abrir apps desde segundo plano",
+                Toast.LENGTH_LONG).show()
+            startActivityForResult(
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")),
+                REQ_OVERLAY
+            )
         }
     }
 }

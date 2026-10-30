@@ -7,6 +7,7 @@ import java.util.Locale
 sealed class CommandResult {
     object Sleep : CommandResult()
     object ListApps : CommandResult()
+    object ListAppsVerbose : CommandResult()
     object EnterContinuous : CommandResult()
     object ExitContinuous : CommandResult()
     object PauseTts : CommandResult()
@@ -22,11 +23,7 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
 
     private val openPrefixes = listOf(
         "abre la app ", "abre el ", "abre la ", "abre ",
-        "abrir la app ", "abrir el ", "abrir la ", "abrir ",
-        "lanza la app ", "lanza el ", "lanza la ", "lanza ",
-        "abreme la app ", "abreme la ", "abreme el ", "abreme ",
-        "arranca la app ", "arranca el ", "arranca la ", "arranca ",
-        "arrancame la app ", "arrancame la ", "arrancame el ", "arrancame "
+        "abrir la app ", "abrir el ", "abrir la ", "abrir "
     )
 
     fun parse(raw: String): CommandResult {
@@ -34,18 +31,26 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         return when {
             text.isBlank() -> CommandResult.Response("no te he entendido")
 
-            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz", "para el tts", "para el texto", "para la lectura") ->
+            matches(text, "lístame las apps", "listame las apps", "lista de apps disponibles",
+                "lista completa de apps", "qué apps disponibles", "que apps disponibles",
+                "todas las apps", "todas las aplicaciones") ->
+                CommandResult.ListAppsVerbose
+
+            matches(text, "lista de apps", "lista apps", "qué apps tengo", "que apps tengo",
+                "lista de aplicaciones") ->
+                CommandResult.ListApps
+
+            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
+                "para el tts", "para el texto", "para la lectura") ->
                 CommandResult.PauseTts
-            matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura", "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo") ->
+            matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura",
+                "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo") ->
                 CommandResult.ResumeTts
 
-            matches(text, "para escucha continua", "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo") ->
+            matches(text, "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo") ->
                 CommandResult.ExitContinuous
             matches(text, "escucha continua", "modo continuo", "escucha constante") ->
                 CommandResult.EnterContinuous
-
-            matches(text, "lista de apps", "lista apps", "qué apps tengo", "que apps tengo", "lista de aplicaciones") ->
-                CommandResult.ListApps
 
             extractAppName(text) != null -> CommandResult.OpenApp(extractAppName(text)!!)
             appLauncher?.hasApp(text) == true -> CommandResult.OpenApp(text)
