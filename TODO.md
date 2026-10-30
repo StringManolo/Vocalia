@@ -2,6 +2,8 @@
 
 Cosas concretas que añadir/parchear/evaluar.
 
+- Revisar como añadir tests (para no oerder funcionalidad), complejo, ya que requiere interaccion por voz.
+
 - La app base debe correr sin necesidad de darle al botón de iniciar servicio. 
 
 - Modo de escucha continuo (por activación por voz, no por defecto) (para no tener que decir "asistente" cada vez que se quiera instruir).
@@ -16,9 +18,11 @@ Cosas concretas que añadir/parchear/evaluar.
 
 - Añadir confirmación robusta (con pin opcional) para tareas sensitivas. (Modo Root, similar a como funciona SUDO y SUDO SU en Linux)
 
+- Cuabdo se cambie a voz inteligente, que el tts diga, espera unos segundos...
+
 - Añadir "repite el último mensaje/tts"
 
-- Test other voices
+- Test other voices (añadir "cambia voz" para iterar entre ellas o "cambia voz a $VOZ")
 
 - Que el TTS lea los alias en viz alto para las apps instaladas
 

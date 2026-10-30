@@ -72,39 +72,49 @@ class VocaliaService : Service() {
             "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo",
             "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
             "para el tts", "para el texto", "para la lectura",
+            "pausa", "para", "parar", "pausar",
             "continua el tts", "continua el texto", "continua la lectura", "continua lectura", "continua voz",
-            "reanuda el tts", "reanuda la lectura", "sigue leyendo",
+            "reanuda el tts", "reanuda la lectura", "sigue leyendo", "continua", "reanuda", "sigue",
             "lista apps", "lista de apps", "que apps tengo", "lista de aplicaciones",
-            "listame las apps", "lista de apps disponibles", "todas las apps", "todas las aplicaciones"
+            "listame las apps", "lista de apps disponibles", "todas las apps", "todas las aplicaciones",
+            "cierra esta app", "cierra la app actual", "cierra esto",
+            "cierra la app que esté abierta", "cierra lo que hay delante",
+            "ayuda", "que puedes hacer", "que sabes hacer",
+            "dime todo lo que puedes hacer", "dime lo que puedes hacer",
+            "guia", "comandos", "lista de comandos",
+            "que comandos tienes"
         )
 
         val added = mutableSetOf<String>()
-
         fun addUnique(s: String) {
             if (s.isNotBlank() && added.add(s)) commands.add(s)
         }
 
-        // Nombres de apps: "X" (si 1-2 palabras) y "abre X"
+        val openPrefixes = listOf("abre", "abrir")
+        val closePrefixes = listOf("cierra", "cerrar", "mata", "matar")
+
         for (app in appNames) {
             val clean = app.replace("\"", "").replace("\\", "").trim()
             if (clean.isBlank()) continue
             val words = clean.split("\\s+".toRegex())
             if (words.size <= 2) addUnique(clean)
-            addUnique("abre $clean")
+            for (p in openPrefixes) addUnique("$p $clean")
+            for (p in closePrefixes) addUnique("$p $clean")
 
             val sinTildes = normalize(clean)
             if (sinTildes != clean && sinTildes.isNotBlank()) {
                 if (words.size <= 2) addUnique(sinTildes)
-                addUnique("abre $sinTildes")
+                for (p in openPrefixes) addUnique("$p $sinTildes")
+                for (p in closePrefixes) addUnique("$p $sinTildes")
             }
         }
 
-        // Aliases manuales: "alias" y "abre alias"
         for (alias in aliases) {
             val clean = alias.replace("\"", "").replace("\\", "").trim()
             if (clean.isBlank()) continue
             addUnique(clean)
-            addUnique("abre $clean")
+            for (p in openPrefixes) addUnique("$p $clean")
+            for (p in closePrefixes) addUnique("$p $clean")
         }
 
         commands.add("[unk]")

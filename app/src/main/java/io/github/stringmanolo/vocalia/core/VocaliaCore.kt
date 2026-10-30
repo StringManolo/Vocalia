@@ -17,11 +17,33 @@ class VocaliaCore(
 
     companion object {
         const val GRAMMAR_TTS_SPEAKING = """[
-            "asistente pausa el tts", "asistente pausa el texto", "asistente pausa la lectura",
-            "asistente pausa lectura", "asistente pausa voz", "asistente para el tts",
-            "asistente para el texto", "asistente para la lectura",
+            "asistente", "asistentes",
+            "para", "pausa", "parar", "pausar", "stop", "silencio", "callate",
+            "asistente para", "asistente pausa", "asistente parar", "asistente pausar",
+            "asistente stop", "asistente silencio", "asistente callate",
+            "asistente para el tts", "asistente pausa el tts",
+            "asistente para el texto", "asistente pausa el texto",
+            "asistente para la lectura", "asistente pausa la lectura",
+            "asistente pausa lectura", "asistente pausa voz",
             "[unk]"
         ]"""
+
+        private const val HELP_TEXT =
+            "Puedo hacer muchas cosas. Te las resumo por categorías. " +
+            "Para abrir una app: di, asistente, abre, seguido del nombre, o simplemente asistente y el nombre de la app. " +
+            "Para cerrar una app: asistente, cierra, seguido del nombre. O asistente, cierra esta app. " +
+            "Para saber la hora: asistente, qué hora es. " +
+            "Para saber la fecha: asistente, qué día es. " +
+            "Para cambiar a voz natural: asistente, usa voz inteligente. " +
+            "Para volver a voz robótica: asistente, usa voz por defecto. " +
+            "Para activar el modo escucha continua: asistente, escucha continua. " +
+            "Para desactivarlo: asistente, descansa. " +
+            "Para listar tus apps: asistente, lista de apps. " +
+            "Para que te lea todas las apps: asistente, lístame las apps. " +
+            "Para pausar una lectura: asistente, para, o asistente, pausa. " +
+            "Para reanudar una lectura: asistente, continúa. " +
+            "Para saludarme: asistente, hola, o asistente, cómo estás. " +
+            "Y para escuchar esto otra vez: asistente, ayuda."
     }
 
     private var state = State.IDLE
@@ -34,7 +56,11 @@ class VocaliaCore(
 
     private val resumeDelayMs = 10L
     private val listeningTimeoutMs = 5_000L
-    private val safetyTimeoutMs = 600_000L // 10 min para lecturas muy largas
+    private val safetyTimeoutMs = 600_000L
+
+    private val pauseWords = setOf(
+        "para", "pausa", "parar", "pausar", "stop", "silencio", "callate", "callá"
+    )
 
     fun start(grammar: String) {
         log("start")
@@ -192,14 +218,20 @@ class VocaliaCore(
                 handleCommand(command, State.CONTINUOUS)
             }
             State.TTS_SPEAKING -> {
-                val (hasWake, remainder) = extractWake(text)
-                if (hasWake && remainder.isNotBlank()) {
-                    val parsed = commandParser.parse(remainder)
-                    if (parsed is CommandResult.PauseTts) {
-                        log("TTS_SPEAKING: pausa solicitada")
-                        ttsManager.pause()
-                        enterTtsPaused()
-                    } else log("TTS_SPEAKING: comando no permitido, ignorando")
+                val textLower = text.lowercase()
+                val hasWake = textLower.contains("asistente") || textLower.contains("asistentes")
+                val cleanText = textLower
+                    .replace("asistentes", "")
+                    .replace("asistente", "")
+                    .trim()
+                val words = cleanText.split("\\s+".toRegex()).filter { it.isNotBlank() }
+                val isPause = hasWake && words.any { it in pauseWords }
+                if (isPause) {
+                    log("TTS_SPEAKING: pausa detectada en \"$text\"")
+                    ttsManager.pause()
+                    enterTtsPaused()
+                } else {
+                    log("TTS_SPEAKING: comando no permitido, ignorando (hasWake=$hasWake)")
                 }
             }
             State.TTS_PAUSED -> {
@@ -244,6 +276,10 @@ class VocaliaCore(
             CommandResult.EnterContinuous -> speakAndReturn("escucha continua activada") { enterContinuous() }
             CommandResult.PauseTts -> { log("PauseTts fuera de TTS_SPEAKING, ignorado"); afterExecution() }
             CommandResult.ResumeTts -> { log("ResumeTts fuera de TTS_PAUSED, ignorado"); afterExecution() }
+            CommandResult.Help -> {
+                log("Help solicitado")
+                speakAndReturn(HELP_TEXT) { afterExecution() }
+            }
             CommandResult.ListApps -> {
                 val all = appLauncher.getAllAppsForTTS()
                 log("ListApps: ${all.size} apps")
@@ -254,7 +290,11 @@ class VocaliaCore(
             CommandResult.ListAppsVerbose -> {
                 val all = appLauncher.getAllAppsForTTS()
                 log("ListAppsVerbose: ${all.size} apps")
-                all.forEach { log("ListAppsVerbose:   - $it") }
+                all.forEach { app ->
+                    val aliases = appLauncher.getAliasesForApp(app)
+                    if (aliases.isEmpty()) log("ListAppsVerbose:   - $app")
+                    else log("ListAppsVerbose:   - $app (di: ${aliases.joinToString(" / ")})")
+                }
                 val msg = if (all.isEmpty()) "no tengo apps instaladas"
                 else "tengo ${all.size} apps instaladas. Son: ${all.joinToString(", ")}"
                 speakAndReturn(msg) { afterExecution() }
@@ -290,6 +330,30 @@ class VocaliaCore(
                 }
                 log("OpenApp(\"${parsed.appName}\") -> $message")
                 speakAndReturn(message) { afterExecution() }
+            }
+            is CommandResult.CloseApp -> {
+                val pkg = appLauncher.findPackage(parsed.appName)
+                if (pkg == null) {
+                    speakAndReturn("no encuentro la app ${parsed.appName}") { afterExecution() }
+                } else {
+                    log("CloseApp(\"${parsed.appName}\") pkg=$pkg")
+                    appLauncher.bringVocaliaToFront()
+                    mainHandler.postDelayed({
+                        val r = appLauncher.closeApp(parsed.appName)
+                        val message = when (r) {
+                            is AppLauncher.Result.Ok -> "cerrando ${parsed.appName}"
+                            is AppLauncher.Result.NotFound -> "no encuentro la app ${parsed.appName}"
+                            is AppLauncher.Result.Error -> "no pude cerrar ${parsed.appName}"
+                        }
+                        log("CloseApp(\"${parsed.appName}\") -> $message")
+                        speakAndReturn(message) { afterExecution() }
+                    }, 600)
+                }
+            }
+            CommandResult.CloseForegroundApp -> {
+                log("CloseForegroundApp: trayendo Vocalia al frente")
+                appLauncher.bringVocaliaToFront()
+                speakAndReturn("cerrando app actual") { afterExecution() }
             }
         }
     }

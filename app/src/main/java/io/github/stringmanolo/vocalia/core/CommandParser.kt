@@ -12,9 +12,12 @@ sealed class CommandResult {
     object ExitContinuous : CommandResult()
     object PauseTts : CommandResult()
     object ResumeTts : CommandResult()
+    object CloseForegroundApp : CommandResult()
+    object Help : CommandResult()
     data class Response(val text: String) : CommandResult()
     data class SetVoiceMode(val intelligent: Boolean) : CommandResult()
     data class OpenApp(val appName: String) : CommandResult()
+    data class CloseApp(val appName: String) : CommandResult()
 }
 
 class CommandParser(private val appLauncher: AppLauncher? = null) {
@@ -26,10 +29,23 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         "abrir la app ", "abrir el ", "abrir la ", "abrir "
     )
 
+    private val closePrefixes = listOf(
+        "cierra la app ", "cierra el ", "cierra la ", "cierra ",
+        "cerrar la app ", "cerrar el ", "cerrar la ", "cerrar ",
+        "mata la app ", "mata el ", "mata la ", "mata ",
+        "matar la app ", "matar el ", "matar la ", "matar "
+    )
+
     fun parse(raw: String): CommandResult {
         val text = raw.lowercase(esLocale).trim()
         return when {
             text.isBlank() -> CommandResult.Response("no te he entendido")
+
+            matches(text, "ayuda", "qué puedes hacer", "que puedes hacer",
+                "qué sabes hacer", "que sabes hacer", "dime todo lo que puedes hacer",
+                "dime lo que puedes hacer", "guía", "guia", "comandos",
+                "lista de comandos", "qué comandos tienes", "que comandos tienes") ->
+                CommandResult.Help
 
             matches(text, "lístame las apps", "listame las apps", "lista de apps disponibles",
                 "lista completa de apps", "qué apps disponibles", "que apps disponibles",
@@ -41,10 +57,12 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
                 CommandResult.ListApps
 
             matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
-                "para el tts", "para el texto", "para la lectura") ->
+                "para el tts", "para el texto", "para la lectura",
+                "pausa", "para", "parar", "pausar", "silencio", "callate", "stop") ->
                 CommandResult.PauseTts
             matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura",
-                "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo") ->
+                "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo",
+                "continua", "continúa", "reanuda", "sigue") ->
                 CommandResult.ResumeTts
 
             matches(text, "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo") ->
@@ -52,10 +70,16 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
             matches(text, "escucha continua", "modo continuo", "escucha constante") ->
                 CommandResult.EnterContinuous
 
+            extractCloseAppName(text) != null -> CommandResult.CloseApp(extractCloseAppName(text)!!)
+
+            matches(text, "cierra esta app", "cierra la app actual", "cierra esto",
+                "cierra la app que esté abierta", "cierra lo que hay delante") ->
+                CommandResult.CloseForegroundApp
+
             extractAppName(text) != null -> CommandResult.OpenApp(extractAppName(text)!!)
             appLauncher?.hasApp(text) == true -> CommandResult.OpenApp(text)
 
-            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "silencio", "callate") ->
+            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir") ->
                 CommandResult.Sleep
 
             matches(text, "inteligente", "piper", "neuronal", "natural") ->
@@ -74,6 +98,20 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
 
     private fun extractAppName(text: String): String? {
         for (p in openPrefixes) {
+            if (text.startsWith(p)) {
+                val raw = text.removePrefix(p).trim()
+                val stripped = raw
+                    .removeSuffix(" callate").removeSuffix(" calla")
+                    .removeSuffix(" por favor").removeSuffix(" ahora").removeSuffix(" ya")
+                    .trim()
+                return if (stripped.isNotBlank()) stripped else null
+            }
+        }
+        return null
+    }
+
+    private fun extractCloseAppName(text: String): String? {
+        for (p in closePrefixes) {
             if (text.startsWith(p)) {
                 val raw = text.removePrefix(p).trim()
                 val stripped = raw
