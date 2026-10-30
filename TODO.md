@@ -2,6 +2,9 @@
 
 Cosas concretas que añadir/parchear/evaluar.
 
+### Meta
+Reorganizar por Quality of Life, seguridad, Core, etc
+
 ### Ciberseguridad
 ##### Vulnerabilidades Conocidas
 - Audios en speaker pueden atacar a la app. Por ejemplo si te mandan un audio por Telegram, pueden instruir a Vocalia que hacer. (necesario pensar en solución robusta que no tenga workarounds sin limitar la app)
@@ -21,6 +24,11 @@ Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
 
 #### general
 
+- Abrir automáticmanete la config del servicio de accesibilidad / pedirlo programáticamente
+
+- Añadir modo "dormir" automático. Cuando la app pasa mucho tiempo sin recibir "VOCALIA" se "desactiva" pasando de escuchar todo el tiempo a solo escuchar durante un periodo muy breve cada X segundos. (Objetivo, ahorrar recursos / bateria cuando no se está usando  ya que está diseñada para estar siempre activa). 
+
+- Intentar **tirar** la app por voz, reiniciando el dispositivo, apagado por falta de batería, etc. JAMÁS, debe dejar de funcionar una vez configurado. 
 - Añadir atajos al modo USAR por app. Estos atajos deben poder crearse dinámicamente / por app. por ejemplo app-shortcuts-telegram.voc.json. Dentro van gramaticas y atajos de accesibilitu, rollo: Abrir chat "Escribir", abre el chat llamado Escribir (toggle 3 veces siguiente, etc. Lo que corresponda. Estos deben poder editarse live. Por ejemplo que se creen en una carpeta publica accesible y se cargen en caliente. Asi el usuario final puede editarlos, añadir nuevos, borrarlos, etc, sin tener que reinstalar la app. En el futuro permitir editar estos archivos por voz, cuando se añada el modo dictado.
 
 - Avisar de chuncks largos (para que el usuario sepa que el tts continua) o usar chunks exactos para tts.

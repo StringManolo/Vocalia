@@ -40,6 +40,9 @@ class VocaliaCore(
             "siguiente", "avanza", "siguiente elemento", "el siguiente",
             "anterior", "retrocede", "anterior elemento", "el anterior",
             "lee", "leer", "lee elemento", "leer elemento", "léelo", "leelo",
+            "detalle", "detalles", "describe", "describelo", "descríbelo",
+            "más detalle", "mas detalle", "más información", "mas informacion",
+            "más información del elemento", "mas informacion del elemento",
             "pulsa", "pulsar", "toca", "tocar", "activar elemento", "activa elemento",
             "click", "clic",
             "atrás", "atras", "back", "regresa", "volver atrás", "vuelve atrás",
@@ -73,7 +76,7 @@ class VocaliaCore(
             "Saludarme: di vocalia, hola. " +
             "Y repetir esto: di vocalia, ayuda. " +
             "Para navegar por la pantalla: di vocalia, modo usar. " +
-            "Y dentro de él: siguiente, anterior, lee elemento, pulsa, atrás, " +
+            "Y dentro de él: siguiente, anterior, lee elemento, detalle, pulsa, atrás, " +
             "arrastra arriba, arrastra abajo, arrastra izquierda, arrastra derecha, " +
             "portapapeles pegar. Sal con vocalia, sal del modo usar."
     }
@@ -604,6 +607,7 @@ class VocaliaCore(
             CommandResult.UiNext     -> a11yCommand { it.nextNode() }
             CommandResult.UiPrevious -> a11yCommand { it.previousNode() }
             CommandResult.UiRead     -> a11yCommand { it.readCurrentNode() }
+            CommandResult.UiDetail   -> a11yCommand { it.describeCurrentNodeDetailed() }
             CommandResult.UiClick    -> a11yCommand(refreshAfter = true) { it.clickCurrentNode() }
             CommandResult.UiBack     -> a11yCommand(refreshAfter = true) { it.performBack() }
             CommandResult.UiPaste    -> a11yCommand { it.pasteClipboard() }

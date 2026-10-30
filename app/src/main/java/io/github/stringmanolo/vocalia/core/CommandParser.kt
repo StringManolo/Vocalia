@@ -25,6 +25,7 @@ sealed class CommandResult {
     object UiNext : CommandResult()
     object UiPrevious : CommandResult()
     object UiRead : CommandResult()
+    object UiDetail : CommandResult()
     object UiClick : CommandResult()
     object UiBack : CommandResult()
     object UiPaste : CommandResult()
@@ -99,6 +100,12 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         if (matches(text, "anterior", "retrocede",
                 "anterior elemento", "el anterior")) {
             return CommandResult.UiPrevious
+        }
+        if (matches(text,
+                "detalle", "detalles", "describe", "describelo", "descríbelo",
+                "más detalle", "mas detalle", "más información", "mas informacion",
+                "más información del elemento", "mas informacion del elemento")) {
+            return CommandResult.UiDetail
         }
         if (matches(text,
                 "lee elemento", "leer elemento",
