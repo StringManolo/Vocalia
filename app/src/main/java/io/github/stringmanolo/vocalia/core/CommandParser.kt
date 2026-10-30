@@ -56,19 +56,22 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
                 "lista de aplicaciones") ->
                 CommandResult.ListApps
 
-            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
-                "para el tts", "para el texto", "para la lectura",
-                "pausa", "para", "parar", "pausar", "silencio", "callate", "stop") ->
-                CommandResult.PauseTts
-            matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura",
-                "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo",
-                "continua", "continúa", "reanuda", "sigue") ->
-                CommandResult.ResumeTts
-
+            // EnterContinuous antes que ResumeTts y PauseTts
             matches(text, "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo") ->
                 CommandResult.ExitContinuous
             matches(text, "escucha continua", "modo continuo", "escucha constante") ->
                 CommandResult.EnterContinuous
+
+            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
+                "para el tts", "para el texto", "para la lectura",
+                "pausa", "para", "parar", "pausar", "silencio", "callate", "callá", "stop",
+                "detente", "basta", "alto", "quieto") ->
+                CommandResult.PauseTts
+
+            matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura",
+                "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo",
+                "continua", "continúa", "reanuda", "sigue") ->
+                CommandResult.ResumeTts
 
             extractCloseAppName(text) != null -> CommandResult.CloseApp(extractCloseAppName(text)!!)
 

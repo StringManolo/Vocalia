@@ -60,9 +60,12 @@ class VocaliaService : Service() {
         ttsManager.init()
     }
 
-    private fun buildGrammar(appNames: List<String>, aliases: Set<String>): String {
+
+        private fun buildGrammar(appNames: List<String>, aliases: Set<String>): String {
         val commands = mutableListOf(
-            "asistente", "asistentes",
+            // Wake words (vocalia / boca lia)
+            "vocalia", "vocalía", "boca lia", "boca lía", "bocalia",
+            // Comandos
             "que hora es", "que hora", "la hora", "hora es",
             "que dia es", "que dia", "que fecha", "fecha",
             "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "silencio", "callate",

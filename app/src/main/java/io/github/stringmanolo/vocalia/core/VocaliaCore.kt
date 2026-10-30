@@ -16,36 +16,38 @@ class VocaliaCore(
     private enum class State { IDLE, LISTENING, EXECUTING, CONTINUOUS, TTS_SPEAKING, TTS_PAUSED }
 
     companion object {
+        /** Wake words: lo que Vosk transcribe de "vocalia" + variantes. */
+        val WAKE_WORDS = listOf(
+            "boca lía", "boca lia", "bocalia", "vocalía", "vocalia"
+        )
+
         const val GRAMMAR_TTS_SPEAKING = """[
-            "asistente", "asistentes",
-            "para", "pausa", "parar", "pausar", "stop", "silencio", "callate",
-            "asistente para", "asistente pausa", "asistente parar", "asistente pausar",
-            "asistente stop", "asistente silencio", "asistente callate",
-            "asistente para el tts", "asistente pausa el tts",
-            "asistente para el texto", "asistente pausa el texto",
-            "asistente para la lectura", "asistente pausa la lectura",
-            "asistente pausa lectura", "asistente pausa voz",
+            "boca lia", "boca lía", "bocalia", "vocalia", "vocalía",
+            "para", "pausa", "parar", "pausar", "stop", "silencio", "callate", "callá",
+            "detente", "basta", "alto", "quieto",
+            "boca lia para", "boca lia pausa", "boca lia stop",
+            "boca lia detente", "boca lia silencio",
+            "vocalia para", "vocalia pausa", "vocalia stop",
+            "vocalia detente", "vocalia silencio",
             "[unk]"
         ]"""
 
         private const val HELP_TEXT =
-            "Puedo hacer muchas cosas. Te las resumo por categorías. " +
-            "Para abrir una app, di abre seguido del nombre. " +
-            "Para cerrar una app, di cierra seguido del nombre. " +
-            "Para traer una app al frente, di cierra esta app. " +
-            "Para saber la hora, di qué hora es. " +
-            "Para la fecha, di qué día es. " +
-            "Para cambiar a voz natural, di usa voz inteligente. " +
-            "Para volver a voz robótica, di usa voz por defecto. " +
-            "Para activar el modo escucha continua, di escucha continua. " +
-            "Para desactivarlo, di descansa. " +
-            "Para listar tus apps, di lista de apps. " +
-            "Para que te lea todas las apps, di lístame las apps. " +
-            "Para detener una lectura en curso, di la palabra stop. " +
-            "Para reanudarla, di continúa. " +
-            "Para saludarme, di hola. " +
-            "Para escuchar esto otra vez, di ayuda. " +
-            "Recuerda decir la palabra asistente antes de cada orden."
+            "Puedo hacer estas cosas. " +
+            "Abrir una app: di vocalia abre, seguido del nombre. " +
+            "Cerrar una app: di vocalia cierra, seguido del nombre. " +
+            "Traer una app al frente: di vocalia, cierra esta app. " +
+            "Saber la hora: di vocalia, qué hora es. " +
+            "Saber la fecha: di vocalia, qué día es. " +
+            "Cambiar a voz natural: di vocalia, usa voz inteligente. " +
+            "Volver a voz robótica: di vocalia, usa voz por defecto. " +
+            "Activar el modo escucha continua: di vocalia, escucha continua. " +
+            "Desactivarlo: di vocalia, descansa. " +
+            "Listar tus apps: di vocalia, lista de apps. " +
+            "Que te lea todas las apps: di vocalia, lístame las apps. " +
+            "Reanudar una lectura pausada: di vocalia, continúa. " +
+            "Saludarme: di vocalia, hola. " +
+            "Y repetir esto: di vocalia, ayuda."
     }
 
     private var state = State.IDLE
@@ -60,8 +62,9 @@ class VocaliaCore(
     private val listeningTimeoutMs = 5_000L
     private val safetyTimeoutMs = 600_000L
 
-    private val pauseWords = setOf(
-        "para", "pausa", "parar", "pausar", "stop", "silencio", "callate", "callá"
+    private val allPauseWords = setOf(
+        "para", "pausa", "parar", "pausar", "stop",
+        "silencio", "callate", "callá", "detente", "basta", "alto", "quieto"
     )
 
     fun start(grammar: String) {
@@ -158,7 +161,7 @@ class VocaliaCore(
         voskEngine.stopListening()
         voskEngine.setGrammar(GRAMMAR_TTS_SPEAKING)
         voskEngine.startListening()
-        log("Vosk escuchando (TTS_SPEAKING, gramática restringida)")
+        log("Vosk escuchando (TTS_SPEAKING)")
     }
 
     private fun enterTtsPaused() {
@@ -220,29 +223,23 @@ class VocaliaCore(
                 handleCommand(command, State.CONTINUOUS)
             }
             State.TTS_SPEAKING -> {
+                val (hasWake, _) = extractWake(text)
                 val textLower = text.lowercase()
-                val hasWake = textLower.contains("asistente") || textLower.contains("asistentes")
-                val cleanText = textLower
-                    .replace("asistentes", "")
-                    .replace("asistente", "")
-                    .trim()
-                val words = cleanText.split("\\s+".toRegex()).filter { it.isNotBlank() }
-                val isPause = hasWake && words.any { it in pauseWords }
-                if (isPause) {
-                    // Comprobar si el chunk actual del TTS contiene las palabras → probable eco
-                    val chunk = ttsManager.getCurrentChunkText() ?: ""
-                    val chunkLower = chunk.lowercase()
-                    val chunkHasTrigger = chunkLower.contains("asistente") ||
-                            pauseWords.any { chunkLower.contains(it) }
-                    if (chunkHasTrigger) {
-                        log("TTS_SPEAKING: pausa ignorada (posible eco del TTS, chunk contiene trigger)")
-                    } else {
-                        log("TTS_SPEAKING: pausa detectada en \"$text\"")
+                val words = textLower.split("\\s+".toRegex()).filter { it.isNotBlank() }
+                val userPauseWord = words.firstOrNull { it in allPauseWords }
+
+                when {
+                    userPauseWord == null ->
+                        log("TTS_SPEAKING: no pause word, ignorando")
+                    hasWake -> {
+                        log("TTS_SPEAKING: pausa por '$userPauseWord' (con wake word)")
                         ttsManager.pause()
                         enterTtsPaused()
                     }
-                } else {
-                    log("TTS_SPEAKING: comando no permitido, ignorando (hasWake=$hasWake)")
+                    else -> {
+                        // Sin wake word: rechazar para evitar eco del propio TTS
+                        log("TTS_SPEAKING: '$userPauseWord' sin wake word, ignorando (anti-eco)")
+                    }
                 }
             }
             State.TTS_PAUSED -> {
@@ -278,7 +275,6 @@ class VocaliaCore(
 
     private fun handleCommand(text: String, returnTo: State) {
         log("handleCommand: \"$text\" returnTo=$returnTo")
-        // Si hay TTS en curso (p.ej. venimos de TTS_PAUSED con otro comando), pararlo primero
         if (ttsManager.isSpeaking()) {
             log("handleCommand: cancelando TTS en curso")
             ttsManager.stop()
@@ -375,11 +371,16 @@ class VocaliaCore(
         }
     }
 
+    /** Matches wake word only at START of text. Returns (hasWake, remainder). */
     private fun extractWake(text: String): Pair<Boolean, String> {
-        val words = text.split(" ").filter { it.isNotBlank() }
-        val wakeIdx = words.indexOfFirst { it == "asistente" || it == "asistentes" }
-        if (wakeIdx < 0) return false to ""
-        return true to (if (wakeIdx == words.lastIndex) "" else words.drop(wakeIdx + 1).joinToString(" "))
+        val lower = text.lowercase().trim()
+        for (w in WAKE_WORDS) {
+            if (lower.startsWith(w)) {
+                val remainder = lower.substring(w.length).trim()
+                return true to remainder
+            }
+        }
+        return false to ""
     }
 
     private fun extractText(json: String): String = try {

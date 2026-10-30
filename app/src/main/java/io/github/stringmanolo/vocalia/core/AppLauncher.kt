@@ -154,7 +154,6 @@ class AppLauncher(private val context: Context) {
         "panther" to listOf("com.stringmanolo.panther")
     )
 
-    // Transliteración ruso → español para que espeak-ng pueda leer nombres cirílicos
     private val cyrillicToSpanish: Map<Char, String> = mapOf(
         'А' to "A", 'Б' to "B", 'В' to "V", 'Г' to "G", 'Д' to "D", 'Е' to "E",
         'Ё' to "Yo", 'Ж' to "Zh", 'З' to "Z", 'И' to "I", 'Й' to "Y", 'К' to "K",
@@ -185,7 +184,6 @@ class AppLauncher(private val context: Context) {
     fun getAllInstalledAppNames(): List<String> =
         getInstalledApps().map { it.first.lowercase() }.distinct().sorted()
 
-    /** Devuelve los nombres para TTS, con transliteración cirílico→español. */
     fun getAllAppsForTTS(): List<String> =
         getInstalledApps().map { transliterateCyrillic(it.first) }.distinct().sorted()
 
@@ -212,7 +210,6 @@ class AppLauncher(private val context: Context) {
         }
 
         val apps = getInstalledApps()
-        // Normalizar label transliterado para que "galeria" encuentre "Галерея"
         val normalizedApps = apps.map { normalize(transliterateCyrillic(it.first)) to it }
         val exact = normalizedApps.firstOrNull { it.first == query }?.second
         val startsWith = exact ?: normalizedApps.firstOrNull { it.first.startsWith(query) }?.second
@@ -325,14 +322,13 @@ class AppLauncher(private val context: Context) {
         tasks.isNotEmpty() && tasks[0].topActivity?.packageName == pkg
     } catch (_: Throwable) { false }
 
-    /** Devuelve el label visible de la app (ej: "AnkiDroid") a partir de su packageName. */
+    /** Devuelve el label visible TRANSLITERADO si es cirílico. */
     private fun getLabelForPackage(pkg: String): String? = try {
         val pm = context.packageManager
         val appInfo = pm.getApplicationInfo(pkg, 0)
-        pm.getApplicationLabel(appInfo).toString()
+        transliterateCyrillic(pm.getApplicationLabel(appInfo).toString())
     } catch (_: Throwable) { null }
 
-    /** Transliteración cirílico → español para que espeak-ng pueda leer nombres rusos. */
     private fun transliterateCyrillic(input: String): String {
         val sb = StringBuilder()
         for (ch in input) {

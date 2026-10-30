@@ -124,7 +124,7 @@ class TtsManager(private val context: Context) {
                     val latch = CountDownLatch(1)
                     engine.onComplete = { latch.countDown() }
                     engine.speak(chunk)
-                    latch.await(120, TimeUnit.SECONDS)
+                    latch.await(180, TimeUnit.SECONDS)
                 }
             } catch (t: Throwable) {
                 dbg("speak: THREW ${t.javaClass.simpleName}: ${t.message}")
@@ -161,7 +161,6 @@ class TtsManager(private val context: Context) {
         stopped = true
         paused = false
         currentEngine?.stop()
-        // Síncrono: esperar a que el speak thread muera (máx 2 s)
         try { speakThread?.join(2000) } catch (_: InterruptedException) {}
         currentChunkText = null
     }
@@ -180,12 +179,13 @@ class TtsManager(private val context: Context) {
     }
 
     private fun splitIntoChunks(text: String): List<String> {
-        if (text.length <= 200) return listOf(text)
+        // 5000 chars: en la práctica el texto entero de un tirón (sin pausas intermedias)
+        if (text.length <= 5000) return listOf(text)
         val sentences = text.split(Regex("(?<=[.,;:!?])\\s+")).filter { it.isNotBlank() }
         val chunks = mutableListOf<String>()
         var buf = StringBuilder()
         for (s in sentences) {
-            if (buf.length + s.length > 200 && buf.isNotEmpty()) {
+            if (buf.length + s.length > 5000 && buf.isNotEmpty()) {
                 chunks.add(buf.toString().trim())
                 buf = StringBuilder()
             }
