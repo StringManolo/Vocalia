@@ -1,6 +1,6 @@
 # Roadmap de Vocalia
 
-**Documento vivo.** Última actualización: Fase 1.2 completada (v0.3.0-sherpa).
+**Documento vivo.** Última actualización: Fase 1.3 completada (v0.4.0-vocalia).
 
 Este documento describe la visión, las fases, las decisiones técnicas y los casos límite que guían el desarrollo de Vocalia. Se actualiza al cerrar cada fase.
 
@@ -72,10 +72,10 @@ Construir un asistente de voz **totalmente offline y sin dependencias de Google*
 **Estado:** completada (v0.3.0-sherpa).
 
 - [x] STT con Vosk modelo `small-es-0.42` (50 MB).
-- [x] Wake word "asistente" (descartada "vocalia": no está en el vocabulario del modelo).
+- [x] Wake word: se probó primero "asistente" y se pensó descartar "vocalia" por no estar en el vocabulario del modelo. **Corregido en Fase 1.3**: Vosk transcribe "vocalia" como `boca lia` / `bocalia`, y el wake word se acepta como variantes transcripcionales. Ver Fase 1.3.
 - [x] Máquina de estados `IDLE → LISTENING → EXECUTING → IDLE`.
-- [x] Wake + comando en un solo turno ("asistente, qué hora es").
-- [x] Timeout de 5 s en LISTENING, safety timeout de 30–60 s en EXECUTING.
+- [x] Wake + comando en un solo turno ("vocalia, qué hora es").
+- [x] Timeout de 5 s en LISTENING, safety timeout de 60 s en EXECUTING.
 - [x] Pitido corto (100 ms) al entrar en LISTENING (feedback no verbal).
 - [x] Comandos: hora, fecha, hola, cómo estás, descansa.
 - [x] TTS dual: espeak-ng (default) + Sherpa/Piper (voz natural).
@@ -92,36 +92,62 @@ Construir un asistente de voz **totalmente offline y sin dependencias de Google*
 
 ---
 
-### 🚧 Fase 1.3 — Intents para abrir apps
+### ✅ Fase 1.3 — Intents para abrir/cerrar apps + control del TTS
 
-**Estado:** siguiente a empezar.
+**Estado:** completada (v0.4.0-vocalia).
 
-Objetivo: abrir cualquier app instalada por voz.
+Objetivo: abrir/cerrar cualquier app instalada por voz, listar apps, y poder pausar/reanudar cualquier lectura del TTS.
 
-- [ ] `AppLauncher` con lista curada de apps comunes (`org.telegram.messenger`, `com.whatsapp`, `com.android.chrome`, `com.google.android.youtube`, `com.android.camera`, `com.android.settings`, `com.android.dialer`, `com.android.contacts`, etc.).
-- [ ] Búsqueda difusa por nombre visible (`PackageManager.queryIntentActivities`).
-- [ ] `QUERY_ALL_PACKAGES` en el manifest.
-- [ ] `Intent.launchIntentForPackage` con fallback a `Intent.CATEGORY_LAUNCHER`.
-- [ ] Comandos: "abre Telegram", "abre el navegador", "abre la cámara", "abre ajustes", "abre contactos", "abre el reloj".
-- [ ] Gramática de Vosk actualizada con las frases de cada app + variantes.
-- [ ] Fallback: "no encuentro esa app" si no hay match.
+- [x] `AppLauncher` con lista curada de ~90 aliases → paquetes (`telegram`, `whatsapp`, `chrome`, `youtube`, `ajustes`, `contactos`, `tarjetas` → AnkiDroid, `sed` → SetEdit, `osu` → osu!droid, etc.).
+- [x] Búsqueda difusa por nombre visible (`PackageManager.queryIntentActivities`) normalizando tildes y transliterando cirílico → latino.
+- [x] `QUERY_ALL_PACKAGES` en el manifest.
+- [x] `getLaunchIntentForPackage` con fallback a `Intent.CATEGORY_LAUNCHER` y flags `NEW_TASK | REORDER_TO_FRONT | BROUGHT_TO_FRONT | SINGLE_TOP`.
+- [x] Comandos:
+  - `abre <app>` / `abrir <app>`.
+  - `cierra <app>` / `cerrar <app>` / `mata <app>` / `matar <app>`.
+  - `cierra esta app` → trae Vocalia al frente y descarta la app en primer plano.
+  - `lista de apps` → lee los nombres instalados (transliterados).
+  - `lístame las apps` → como el anterior + log de alias por app.
+- [x] **Wake word cambiada a `vocalia`** con variantes transcripcionales que produce Vosk: `vocalia`, `vocalía`, `boca lia`, `boca lía`, `bocalia`. Solo se matchea al **inicio** del texto.
+- [x] Gramática dinámica de Vosk generada en `VocaliaService.buildGrammar()` con: wake words + comandos fijos + todas las apps instaladas + todos los aliases, en variantes con y sin tildes, con prefijos `abre`/`cierra`/etc.
+- [x] **Chunking por frase en `TtsManager`**: el texto se trocea en frases (`. ! ?`), uniendo frases cortas hasta ~240 caracteres, partiendo frases largas por `,` `;` `:` o espacio.
+- [x] **Pausa / reanudación del TTS**:
+  - `vocalia pausa` / `detente` / `stop` / `silencio`… → `ttsManager.pause()` + estado `TTS_PAUSED`.
+  - `vocalia continúa` → `ttsManager.resumePaused()`, reanuda desde el chunk/frase en curso.
+  - `pendingChunks` + `pendingStartIndex` guardados en `TtsManager` para reanudar incluso si el usuario ejecutó otro comando por medio y el estado ya no es `TTS_PAUSED`.
+- [x] **Anti-eco** en `TTS_SPEAKING`: sin wake word, las palabras de pausa (`para`, `pausa`, `stop`…) se ignoran para evitar que el propio TTS se auto-pause.
+- [x] **`vocalia ayuda` es un TTS bloqueante**: `isBlockingHelp = true` → Vosk se detiene por completo (`stopListening`) y `handleResult` descarta cualquier resultado hasta que el TTS de ayuda termina. Es el **único** TTS que no acepta pausas ni comandos. El resto siguen siendo navegables.
+- [x] `stop()` síncrono con `join(2000)` para evitar bloqueos tras pausas.
+- [x] Transliteración cirílico → latino para que el TTS lea labels como `Настройки` como `Nastroyki`.
+- [x] Fallback: "no encuentro la app X" si no hay match.
 
-**Notas:**
-- No requiere `AccessibilityService`. `startActivity` es suficiente para abrir apps.
-- El `AndroidManifest` necesita `QUERY_ALL_PACKAGES` (Android 11+) para listar las apps instaladas.
-- Futuro: "cierra [app]" requiere `ActivityManager.killBackgroundProcesses` o AccessibilityService (ver Fase 2).
+**Notas técnicas críticas:**
+- **Chunking por frase** es la base de toda la navegación futura del TTS. Cada chunk es una unidad reanudable. `TtsManager` expone `getChunks()`, `getCurrentChunkIndex()`, `getCurrentChunk()`, `pendingChunks`, `pendingStartIndex` — sin usar aún, pero listos para Fase 1.4.
+- **La pausa re-lee el chunk actual desde su inicio** (una frase completa). No se reanuda en mitad de una palabra ni de una frase. Es correcto con chunks pequeños, y es la única forma realista porque Sherpa no expone offset PCM reproducible en medio de la generación.
+- **El eco del altavoz es el enemigo real**: durante `vocalia ayuda`, el propio TTS pronunciaba frases como *"di vocalia, pausa"* o *"di vocalia, ayuda"*, y Vosk las transcribía como `boca lia silencio` / `boca lia pausa`, disparando pausas accidentales. La solución robusta es **bloquear Vosk por completo** durante la ayuda (`isBlockingHelp`), en lugar de intentar filtrar el eco por palabra.
+- El **anti-eco genérico** (ignorar palabras de pausa sin wake word) cubre el resto de TTS, donde sí queremos aceptar `vocalia pausa` cuando el usuario lo dice de verdad.
+- `AppLauncher` cachea la lista de apps instaladas (`cachedInstalledApps`) para no golpear `PackageManager` en cada comando.
+- La gramática dinámica puede crecer mucho con muchas apps instaladas. Vosk la acepta, pero conviene vigilar el tamaño si el usuario tiene cientos de apps.
 
 ---
 
 ### 🚧 Fase 1.4 — Dictado libre con buffer navegable
 
-**Estado:** planificada.
+**Estado:** siguiente a empezar. La base del chunking por frase ya está lista en `TtsManager`.
 
-Objetivo: dictar texto libre y poder navegarlo, editarlo y usarlo.
+Objetivo: dictar texto libre y poder navegarlo, editarlo y usarlo. Además, extender la navegación del TTS actual con comandos de transporte.
 
+- [ ] Navegación del TTS (aprovechando el chunking por frase ya existente):
+  - "repite la última frase" → re-lee `chunks[currentChunkIndex - 1]`.
+  - "repite las últimas 5 frases".
+  - "repite el último mensaje" → re-lee desde el principio de la lectura actual.
+  - "salta a la siguiente frase" / "salta 5 frases hacia delante".
+  - "copia la última frase al portapapeles".
+  - "lee desde el principio" / "vuelve al principio".
+  - Timestamps por frase (estimados o reales) para "repite los últimos 5 minutos".
 - [ ] Modo dictado (`Recognizer` sin gramática).
 - [ ] Buffer de texto acumulativo.
-- [ ] Comandos de transporte:
+- [ ] Comandos de transporte sobre el buffer dictado:
   - "repite" / "lee todo" / "borra último" / "borra todo".
   - "busca [término]" → salta a la primera ocurrencia y lee desde ahí.
   - "atrás" / "adelante" → mueve el puntero de lectura.
@@ -132,6 +158,7 @@ Objetivo: dictar texto libre y poder navegarlo, editarlo y usarlo.
 - [ ] Feedback: leer cada frase dictada (configurable on/off).
 
 **Notas:**
+- El chunking por frase de Fase 1.3 es deliberadamente la pieza reutilizable aquí: `TtsManager.getChunks()` + `getCurrentChunkIndex()` dan todo lo necesario para implementar repetición y salto de frases sin tocar la lógica de reproducción.
 - Vosk modelo small tiene precisión limitada. Para dictado serio, evaluar:
   - Modelo Vosk `large` (1.4 GB, ~500 MB RAM).
   - **Whisper.cpp en modo batch** (graba frase → transcribe, ~1-2 s por frase, 244 MB modelo small int8).
@@ -286,6 +313,7 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 | **TTS default** | espeak-ng | ~30 MB RAM, siempre disponible, fallback garantizado. |
 | **TTS neuronal** | Sherpa-onnx 1.13.4 + Piper `es_ES-miro-high` | Voz natural, offline, ~250 MB RAM. |
 | **Audio** | `AudioTrack` nativo | Control total. `MODE_STREAM` + PCM 16-bit + `CONTENT_TYPE_MUSIC`. |
+| **Chunking TTS** | Por frase (~240 chars) | Pausas naturales + base para navegación futura. |
 | **Compilación** | GitHub Actions | Sin PC. Edición desde Termux. |
 | **Logs** | `InternalDebug` (disco) | logcat no accesible en producción. |
 | **Estado** | Máquina de estados en `VocaliaCore` | Separación clara de responsabilidades. |
@@ -309,8 +337,13 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 - ❌ `packagingOptions` en AGP 8+ → `packaging`.
 - ❌ `excludes` de `libonnxruntime.so` → elimina todas las copias.
 - ❌ `pickFirsts` sin verificar el orden → puede elegir la versión incorrecta.
-- ❌ Gramática de wake word con palabras inventadas → Vosk no las reconoce.
+- ❌ Gramática de wake word con palabras inventadas → Vosk no las reconoce (corregido: `vocalia` sí se reconoce vía variantes `boca lia`/`bocalia`).
 - ❌ Recrear `SpeechService` en cada cambio de gramática → pierde audio.
+- ❌ **Confiar en el anti-eco por palabra durante un TTS que pronuncia esas mismas palabras** (`vocalia ayuda` dice *"di vocalia, pausa"*). Vosk transcribe el eco como `boca lia silencio` y se auto-pausa. Solución: TTS bloqueante (`isBlockingHelp`) que detiene Vosk por completo mientras dura.
+- ❌ **Chunks de 5000 chars para pausas reanudables**: pausar a mitad deja el chunk entero pendiente y no hay offset PCM reproducible. Solución: chunks por frase (~240 chars).
+- ❌ **`speak()` rechazado por `speaking = true` tras un `pause()`**: el hilo de chunk seguía vivo y bloqueaba cualquier reanudación. Solución: `stop()` síncrono con `join(2000)` + `pendingChunks` en `TtsManager`.
+- ❌ **Buscar wake word con `indexOfFirst` en todo el texto**: confundía `abre vocalia` con wake word. Solución: `startsWith`.
+- ❌ **`ResumeTts` ignorado si el estado ya no era `TTS_PAUSED`** (porque el usuario ejecutó otro comando por medio). Solución: `ttsManager.hasPausedSpeech()` en `handleCommand` para reanudar desde `IDLE` si hay buffer pendiente.
 
 ---
 
@@ -327,7 +360,8 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 - **Memoria:** Vosk small (~400 MB) + Sherpa (~250 MB) + espeak (~30 MB) + Android + app pueden acercarse a 1 GB. En un P40 Lite con 4 GB va, pero el sistema puede matar procesos en segundo plano bajo presión.
 - **Batería:** Vosk con micrófono siempre activo consume. Se recomienda cargar el móvil mientras se conduce.
 - **Micrófono + altavoz simultáneos:** funciona en el P40 Lite. Otros dispositivos pueden requerir `MODE_IN_COMMUNICATION` y `speakerphone`. Hay que testear por dispositivo.
-- **Wake word en entornos ruidosos:** el modelo small puede fallar. Opciones: modelo Vosk large, o wake word de dos palabras ("oye asistente").
+- **Eco del TTS en Vosk:** el altavoz se cuela por el micrófono y Vosk transcribe el propio TTS. Mitigaciones: (1) anti-eco por wake word en `TTS_SPEAKING`; (2) TTS bloqueante en `Ayuda`; (3) en el futuro, AEC por hardware o cancelación de eco en software si aparecen más casos.
+- **Wake word en entornos ruidosos:** el modelo small puede fallar. Opciones: modelo Vosk large, o wake word de dos palabras.
 - **Idioma:** Vosk y Piper son monolingües por modelo. Cambiar de idioma requiere cargar otro modelo. Planificado para Fase 1.5+.
 - **Modelo Vosk small vs large:** el small es rápido pero limitado. Para dictado serio, evaluar Whisper.cpp en batch o Sherpa ASR.
 
@@ -356,12 +390,13 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
    ```kotlin
    matches(text, "tu-comando") -> CommandResult.Response("respuesta")
    ```
-2. Edita la gramática en `VoskEngine.kt`:
+2. Añade la variante a la gramática en `VocaliaService.kt` (`buildGrammar()`):
    ```kotlin
    "tu-comando", "variante1", "variante2",
    ```
-3. Commit, push, espera al APK.
-4. Prueba y abre PR.
+3. (Opcional) Si el comando requiere una acción nueva en `VocaliaCore.kt`, añade un `case` al `when (parsed)` y el correspondiente `CommandResult`.
+4. Commit, push, espera al APK.
+5. Prueba y abre PR.
 
 ### Añadir un motor TTS
 
@@ -369,6 +404,15 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 2. Regístralo en `TtsManager`.
 3. Añade un comando de voz para activarlo.
 4. Commit, push, PR.
+
+### Añadir navegación al TTS
+
+La infraestructura ya está lista en `TtsManager`:
+- `getChunks()`, `getCurrentChunkIndex()`, `getCurrentChunk()` → lectura.
+- `pendingChunks`, `pendingStartIndex` → reanudación.
+- `resumePaused(onStart, onComplete)` → reanudar desde el chunk pendiente.
+
+Para añadir "repite la última frase", extiende `TtsManager` con un método `repeatChunks(n)` que re-emita `chunks.subList(currentIndex - n, currentIndex)` y conéctalo a un nuevo `CommandResult`.
 
 ### Traducir a otro idioma
 
@@ -386,8 +430,8 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 | Fase 0 | ✅ | Servicio robusto, boot, watchdog |
 | Fase 1.1 | ✅ | espeak-ng español |
 | Fase 1.2 | ✅ | Wake word, comandos, TTS dual |
-| Fase 1.3 | 🚧 | Intents (siguiente) |
-| Fase 1.4 | 🚧 | Dictado libre |
+| Fase 1.3 | ✅ | Abrir/cerrar apps, listar apps, pausa/reanudación TTS, chunking por frase, ayuda bloqueante |
+| Fase 1.4 | 🚧 | Dictado libre + navegación por frases |
 | Fase 1.5 | 🚧 | Comandos de sistema |
 | Fase 2 | 🔮 | AccessibilityService |
 | Fase 3 | 🔮 | Termux + terminal |
@@ -405,6 +449,8 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 | Tag | Fecha | Hito |
 | :--- | :--- | :--- |
 | `v0.0.0-debug` | — | Release de pruebas iniciales |
+| `v0.3.0-sherpa` | — | Wake word + comandos + TTS dual |
+| `v0.4.0-vocalia` | — | Abrir/cerrar apps, listar apps, pausa/reanudación TTS, chunking por frase, ayuda bloqueante |
 
 ---
 

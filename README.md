@@ -6,17 +6,16 @@
 
 ## 📥 Descargar
 
-**Última versión estable:** [`v0.3.0-sherpa`](https://github.com/StringManolo/Vocalia/releases)
+**Última versión estable:** [`v0.4.0-vocalia`](https://github.com/StringManolo/Vocalia/releases)
 
 APK directo: [`debug-apk.zip`](https://github.com/StringManolo/Vocalia/releases/download/V0.0.0-debug/debug-apk.zip)
-
-> ⚠️ La APK está firmada con clave de debug. Android mostrará un aviso al instalar. Es normal: la app es sideload, no viene de Play Store. Quizás necesites desactivar playprotect para permitir la instalación.
+                                                                                        > ⚠️ La APK está firmada con clave de debug. Android mostrará un aviso al instalar. Es normal: la app es sideload, no viene de Play Store. Quizás necesites desactivar playprotect para permitir la instalación.
 
 ---
 
 ## 🎯 ¿Qué es Vocalia?
 
-Un asistente de voz que se ejecuta **íntegramente en tu dispositivo**, sin enviar audio a la nube, sin depender de servicios de Google Play, y sin que tengas que tocar la pantalla ni mirarla.
+Un asistente de voz ligero que se ejecuta **íntegramente en tu dispositivo**, sin enviar audio a la nube, sin depender de servicios de Google Play, y sin que tengas que tocar la pantalla ni mirarla.
 
 Piensa en Siri o Google Assistant, pero:
 
@@ -29,34 +28,81 @@ Piensa en Siri o Google Assistant, pero:
 
 - 🚛 **Conductores** de camión, taxi, reparto, que quieren programar, gestionar negocios o consultar cosas mientras conducen sin distraerse.
 - 👁️ **Personas ciegas o con baja visión** que necesitan un control por voz total de su Android.
-- 🦾 **Personas sin movilidad en las manos** que no pueden tocar la pantalla.
+- 🖐️ **Personas sin movilidad en las manos** que no pueden tocar la pantalla.
 - 🍳 **Usuarios normales** que quieren usar el móvil con las manos ocupadas (cocinando, en el taller, etc.).
 
 ---
 
-## ✨ Funcionalidades actuales (v0.3.0)
+## ✨ Funcionalidades actuales (v0.4.0)
 
 ### Wake word
 
-Di **"asistente"** y el sistema te responde. No hay que pulsar ningún botón.
+Di **"vocalia"** y el sistema te responde. No hay que pulsar ningún botón.
+
+Vosk transcribe el wake word de varias formas según el ruido y la pronunciación. Vocalia acepta todas estas variantes:
+
+```
+vocalia, vocalía, boca lia, boca lía, bocalia
+```
+
+Solo se reconocen **al inicio** del texto (para no confundir "abre vocalia" con una wake word).
 
 ### Comandos por voz
 
 ```
-"asistente, hola"
-"asistente, cómo estás"
-"asistente, qué hora es"
-"asistente, qué día es"
-"asistente, usa voz inteligente"
-"asistente, usa voz por defecto"
-"asistente, descansa"
+# Básicos
+"vocalia, hola"
+"vocalia, cómo estás"
+"vocalia, qué hora es"
+"vocalia, qué día es"
+"vocalia, ayuda"
+
+# Abrir / cerrar apps
+"vocalia, abre Telegram"
+"vocalia, abre tarjetas"          ← alias de AnkiDroid
+"vocalia, abre ajustes"
+"vocalia, cierra Telegram"
+"vocalia, cierra esta app"        ← trae Vocalia al frente y descarta la actual
+
+# Listar apps
+"vocalia, lista de apps"          ← lee los nombres
+"vocalia, lístame las apps"       ← lee los nombres + log de alias
+
+# Modo continuo
+"vocalia, escucha continua"       ← comandos sin wake word hasta "descansa"
+"vocalia, desactiva escucha continua"
+
+# Voz
+"vocalia, usa voz inteligente"
+"vocalia, usa voz por defecto"
+
+# Control del TTS (durante una lectura)
+"vocalia, pausa"                  ← también "para", "detente", "stop", "silencio"…
+"vocalia, continúa"               ← reanuda desde la frase donde se quedó
+
+# Descansar
+"vocalia, descansa"
 ```
 
 También funciona **wake word + comando en un solo turno**:
 
 ```
-"asistente, qué hora es"   ← detecta wake word + comando a la vez
+"vocalia, qué hora es"   ← detecta wake word + comando a la vez
 ```
+
+### Pausas y reanudación del TTS
+
+Mientras un TTS se está reproduciendo (lista de apps, apertura de app, hora, etc.), puedes decir **`vocalia pausa`** (o `detente`, `stop`, `silencio`…) para pausarlo. Después, **`vocalia continúa`** para reanudarlo **desde la frase donde se quedó**.
+
+- **Anti-eco:** sin wake word, las palabras de pausa (`para`, `pausa`, `stop`…) se ignoran durante la reproducción. Así el propio TTS no se auto-pausa por el eco del altavoz.
+- **Chunking por frase:** el TTS trocea el texto en frases (`. ! ?`), uniendo frases cortas hasta ~240 caracteres. Las pausas caen entre frases completas, no a mitad de palabra.
+- **Base para el futuro:** cada frase es una unidad reanudable. Repetir la última frase, saltar N frases, copiar al portapapeles, timestamps por frase… todo eso será trivial de añadir.
+
+### `vocalia ayuda` es un TTS bloqueante
+
+A diferencia del resto de TTS, mientras se reproduce la **ayuda**, Vosk se detiene por completo y **no procesa ningún resultado de voz**. Esto evita que el eco del propio altavoz (que contiene frases como *"di vocalia, pausa"* o *"di vocalia, ayuda"*) dispare pausas o comandos accidentales.
+
+Cuando el TTS de ayuda termina, Vosk vuelve a escuchar con normalidad.
 
 ### Doble motor de voz
 
@@ -68,10 +114,10 @@ También funciona **wake word + comando en un solo turno**:
 Cambio en caliente:
 
 ```
-Tú: "asistente, usa voz inteligente"
+Tú: "vocalia, usa voz inteligente"
 Vocalia: "cargando voz inteligente" → (1-4 s) → "voz inteligente activada"
 
-Tú: "asistente, usa voz por defecto"
+Tú: "vocalia, usa voz por defecto"
 Vocalia: "voz por defecto activada"
 ```
 
@@ -108,7 +154,7 @@ Vosk con modelo español (`vosk-model-small-es-0.42`). Reconoce comandos y wake 
    - Acepta la exención de batería.
 4. **Pulsa "Iniciar servicio"**.
 5. **Espera 5 segundos** (carga Vosk y espeak-ng).
-6. **Di "asistente"**. Debe oírse un pitido y estar atento al siguiente comando.
+6. **Di "vocalia"**. Debe oírse un pitido y estar atento al siguiente comando.
 
 ### En Huawei / EMUI (importante)
 
@@ -129,25 +175,41 @@ Sin esto, EMUI matará el servicio a los minutos. Con esto, es estable.
 Con el servicio iniciado, di en voz alta y clara:
 
 ```
-"asistente"
+"vocalia"
    → pitido corto
 
 "qué hora es"
    → "son las 14 y 30"
 
-"asistente, qué día es"
+"vocalia, qué día es"
    → "hoy es jueves 29 de octubre"
 
-"asistente, usa voz inteligente"
+"vocalia, abre Telegram"
+   → "abriendo Telegram" (y Telegram se abre)
+
+"vocalia, abre ajustes"
+   → "abriendo ajustes"
+
+"vocalia, lista de apps"
+   → lee los nombres de las apps instaladas, uno tras otro
+
+"vocalia, usa voz inteligente"
    → "cargando voz inteligente" ... "voz inteligente activada" (voz Piper)
 
-"asistente, qué hora es"
+"vocalia, qué hora es"
    → "son las 14 y 31" (con voz Piper, mucho más natural)
 
-"asistente, usa voz por defecto"
+"vocalia, usa voz por defecto"
    → "voz por defecto activada" (vuelve a espeak)
 
-"asistente, descansa"
+"vocalia, lista de apps"    ← mientras lee:
+"vocalia, pausa"             → el TTS se detiene
+"vocalia, continúa"          → el TTS sigue desde la frase donde se quedó
+
+"vocalia, ayuda"
+   → lee la ayuda entera. Mientras dura, Vosk no escucha nada.
+
+"vocalia, descansa"
    → "descanso" (vuelve a modo wake word)
 ```
 
@@ -176,17 +238,25 @@ Si algo no responde:
     │  Modelo small  │◀───────▶│  │espeak-ng │  │
     │  español       │         │  └──────────┘  │
     │  Gramática     │         │  ┌──────────┐  │
-    │  cerrada       │         │  │  Sherpa  │  │
-    │                │         │  │  (Piper) │  │
-    └────────┬───────┘         │  └──────────┘  │
-             │                 └────────────────┘
+    │  dinámica      │         │  │  Sherpa  │  │
+    │  (wake word +  │         │  │  (Piper) │  │
+    │  apps + cmds)  │         │  └──────────┘  │
+    └────────┬───────┘         └────────────────┘
+             │
              ▼
     ┌──────────────────────────────────────────┐
     │            VocaliaCore                   │
     │  Máquina de estados:                     │
-    │  IDLE → LISTENING → EXECUTING → IDLE     │
+    │  IDLE → LISTENING → EXECUTING → …        │
+    │  … → TTS_SPEAKING ⇄ TTS_PAUSED           │
+    │  (isBlockingHelp ignora Vosk en Ayuda)   │
     │                                          │
-    │  CommandParser → Sleep | Response        │
+    │  CommandParser → Sleep | Help |          │
+    │  ListApps | OpenApp | CloseApp |         │
+    │  PauseTts | ResumeTts | …                │
+    │                                          │
+    │  AppLauncher → abre/cierra apps,         │
+    │  alias, transliteración cirílico→latino  │
     └──────────────────────────────────────────┘
 ```
 
@@ -210,12 +280,12 @@ Si algo no responde:
 
 - **Fase 0**: Servicio persistente, arranque al boot, watchdog, exención de batería.
 - **Fase 1.1**: TTS con espeak-ng en español.
-- **Fase 1.2**: Wake word "asistente", máquina de estados, comandos básicos, TTS dual (espeak + Piper).
+- **Fase 1.2**: Wake word, máquina de estados, comandos básicos, TTS dual (espeak + Piper).
+- **Fase 1.3**: Intents para abrir/cerrar apps con alias, listar apps, pausa/reanudación del TTS, TTS bloqueante de ayuda, chunking por frase.
 
 ### 🚧 En desarrollo
 
-- **Fase 1.3**: Intents para abrir apps ("asistente, abre Telegram").
-- **Fase 1.4**: Dictado libre con buffer navegable ("repite", "busca", "copia al portapapeles").
+- **Fase 1.4**: Dictado libre con buffer navegable ("repite la última frase", "salta 5 frases", "copia al portapapeles", timestamps por frase). La base (chunking por frase en `TtsManager`) ya está lista.
 
 ### 🔮 Planificado
 
@@ -257,10 +327,11 @@ app/src/main/
 │   ├── VoskEngine.kt                # STT
 │   ├── core/
 │   │   ├── VocaliaCore.kt           # Máquina de estados
-│   │   └── CommandParser.kt         # Intérprete de comandos
+│   │   ├── CommandParser.kt         # Intérprete de comandos
+│   │   └── AppLauncher.kt           # Abre/cierra apps, alias, transliteración
 │   ├── tts/
 │   │   ├── TtsEngine.kt             # Interfaz común
-│   │   ├── TtsManager.kt            # Gestor de motores
+│   │   ├── TtsManager.kt            # Gestor de motores + chunking por frase
 │   │   ├── EspeakNgEngine.kt        # Motor espeak-ng
 │   │   └── SherpaOnnxEngine.kt      # Motor Sherpa/Piper
 │   └── util/
@@ -283,11 +354,12 @@ app/src/main/
    ```kotlin
    matches(text, "tu-comando") -> CommandResult.Response("respuesta")
    ```
-2. Edita la gramática en `VoskEngine.kt`:
+2. Añade la variante a la gramática en `VocaliaService.kt` (`buildGrammar()`):
    ```kotlin
    "tu-comando", "variante1", "variante2",
    ```
-3. Commit, push, espera al APK.
+3. (Opcional) Si el comando requiere una acción nueva en `VocaliaCore.kt`, añade un `case` al `when (parsed)` y el correspondiente `CommandResult`.
+4. Commit, push, espera al APK.
 
 ---
 

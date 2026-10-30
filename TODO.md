@@ -2,6 +2,21 @@
 
 Cosas concretas que añadir/parchear/evaluar.
 
+### Fase siguiente
+Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
+
+1. Tiene que leer lo que hay en pantalla. (TODO).
+
+2. Tiene que poder interactuar (equivalente a hacer tab en teclado de pc), (toggle por elementos)
+
+2.1 Tiene que leer lo que hay toggleado
+
+2.2 Tiene que poder enviar eventos al elemento toggleado, como click, drag, etc. Se podría hacer por ejemplo con el fake input que usa el repo https://github.com/stringmanolo/selfcontrol
+
+3 Sistema de dictado (te relee lo que llevar escrito y demás. Básicamente es como vi/vim pero interno por voz, y una vez confirmado te permite usar el texto por etiquetas). Por ejemplo: Pega el texto1. Pega el Texto2. Lee el texto2. Borra el texto2. Edita el Texto1. ...
+
+#### general
+
 - Avisar de chuncks largos (para que el usuario sepa que el tts continua) o usar chunks exactos para tts.
 
 - Testear autonicio tras reboot una vez instalada y configurada (que funcione sin problemas, testear esto también en android moderno)
