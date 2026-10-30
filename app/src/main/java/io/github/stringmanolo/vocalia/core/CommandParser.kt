@@ -18,6 +18,18 @@ sealed class CommandResult {
     data class SetVoiceMode(val intelligent: Boolean) : CommandResult()
     data class OpenApp(val appName: String) : CommandResult()
     data class CloseApp(val appName: String) : CommandResult()
+
+    // --- Modo usar (navegación UI) ---
+    object EnterUiMode : CommandResult()
+    object ExitUiMode : CommandResult()
+    object UiNext : CommandResult()
+    object UiPrevious : CommandResult()
+    object UiRead : CommandResult()
+    object UiClick : CommandResult()
+    object UiBack : CommandResult()
+    object UiPaste : CommandResult()
+    enum class UiDirection { UP, DOWN, LEFT, RIGHT }
+    data class UiScroll(val direction: UiDirection) : CommandResult()
 }
 
 class CommandParser(private val appLauncher: AppLauncher? = null) {
@@ -38,42 +50,121 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
 
     fun parse(raw: String): CommandResult {
         val text = raw.lowercase(esLocale).trim()
-        return when {
-            text.isBlank() -> CommandResult.Response("no te he entendido")
+        if (text.isBlank()) return CommandResult.Response("no te he entendido")
 
+        // ============================================================
+        // Modo usar (UI navigation) — entrada / salida
+        // ============================================================
+        if (matches(text,
+                "modo usar", "activar modo usar", "activa el modo usar",
+                "entra al modo usar", "entrar al modo usar",
+                "modo navegacion", "modo navegación",
+                "activar modo navegacion", "activa el modo navegacion")) {
+            return CommandResult.EnterUiMode
+        }
+        if (matches(text,
+                "sal del modo usar", "salir del modo usar", "salir del modo",
+                "desactiva el modo usar", "termina el modo usar", "fin del modo usar",
+                "sal del modo navegacion", "salir del modo navegacion")) {
+            return CommandResult.ExitUiMode
+        }
+
+        // ============================================================
+        // Comandos dentro del modo usar
+        // ============================================================
+        if (matches(text,
+                "arrastra arriba", "arrastra elemento arriba",
+                "scroll arriba", "desplaza arriba", "sube")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.UP)
+        }
+        if (matches(text,
+                "arrastra abajo", "arrastra elemento abajo",
+                "scroll abajo", "desplaza abajo", "baja")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.DOWN)
+        }
+        if (matches(text,
+                "arrastra izquierda", "arrastra elemento izquierda",
+                "scroll izquierda", "desplaza izquierda")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.LEFT)
+        }
+        if (matches(text,
+                "arrastra derecha", "arrastra elemento derecha",
+                "scroll derecha", "desplaza derecha")) {
+            return CommandResult.UiScroll(CommandResult.UiDirection.RIGHT)
+        }
+        if (matches(text, "siguiente", "avanza",
+                "siguiente elemento", "el siguiente")) {
+            return CommandResult.UiNext
+        }
+        if (matches(text, "anterior", "retrocede",
+                "anterior elemento", "el anterior")) {
+            return CommandResult.UiPrevious
+        }
+        if (matches(text,
+                "lee elemento", "leer elemento",
+                "lee", "leer", "léelo", "leelo")) {
+            return CommandResult.UiRead
+        }
+        if (matches(text,
+                "pulsa", "pulsar", "toca", "tocar",
+                "activa elemento", "activar elemento",
+                "click", "clic")) {
+            return CommandResult.UiClick
+        }
+        if (matches(text,
+                "atrás", "atras", "back",
+                "volver atrás", "vuelve atrás", "regresa")) {
+            return CommandResult.UiBack
+        }
+        if (matches(text,
+                "portapapeles pegar", "pega el portapapeles",
+                "pega del portapapeles", "pega", "pegar")) {
+            return CommandResult.UiPaste
+        }
+
+        // ============================================================
+        // Resto de comandos (ya existentes)
+        // ============================================================
+        return when {
             matches(text, "ayuda", "qué puedes hacer", "que puedes hacer",
-                "qué sabes hacer", "que sabes hacer", "dime todo lo que puedes hacer",
-                "dime lo que puedes hacer", "guía", "guia", "comandos",
+                "qué sabes hacer", "que sabes hacer",
+                "dime todo lo que puedes hacer", "dime lo que puedes hacer",
+                "guía", "guia", "comandos",
                 "lista de comandos", "qué comandos tienes", "que comandos tienes") ->
                 CommandResult.Help
 
-            matches(text, "lístame las apps", "listame las apps", "lista de apps disponibles",
-                "lista completa de apps", "qué apps disponibles", "que apps disponibles",
+            matches(text, "lístame las apps", "listame las apps",
+                "lista de apps disponibles", "lista completa de apps",
+                "qué apps disponibles", "que apps disponibles",
                 "todas las apps", "todas las aplicaciones") ->
                 CommandResult.ListAppsVerbose
 
-            matches(text, "lista de apps", "lista apps", "qué apps tengo", "que apps tengo",
-                "lista de aplicaciones") ->
+            matches(text, "lista de apps", "lista apps",
+                "qué apps tengo", "que apps tengo", "lista de aplicaciones") ->
                 CommandResult.ListApps
 
-            // EnterContinuous antes que ResumeTts y PauseTts
-            matches(text, "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo") ->
+            matches(text, "sal de escucha continua", "desactiva escucha continua",
+                "desactiva modo continuo") ->
                 CommandResult.ExitContinuous
+
             matches(text, "escucha continua", "modo continuo", "escucha constante") ->
                 CommandResult.EnterContinuous
 
-            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
+            matches(text, "pausa el tts", "pausa el texto", "pausa la lectura",
+                "pausa lectura", "pausa voz",
                 "para el tts", "para el texto", "para la lectura",
-                "pausa", "para", "parar", "pausar", "silencio", "callate", "callá", "stop",
-                "detente", "basta", "alto", "quieto") ->
+                "pausa", "para", "parar", "pausar", "silencio", "callate",
+                "callá", "stop", "detente", "basta", "alto", "quieto") ->
                 CommandResult.PauseTts
 
-            matches(text, "continua el tts", "continua el texto", "continua la lectura", "continua lectura",
-                "continua voz", "reanuda el tts", "reanuda la lectura", "sigue leyendo",
+            matches(text, "continua el tts", "continua el texto",
+                "continua la lectura", "continua lectura", "continua voz",
+                "reanuda el tts", "reanuda la lectura", "sigue leyendo",
                 "continua", "continúa", "reanuda", "sigue") ->
                 CommandResult.ResumeTts
 
-            extractCloseAppName(text) != null -> CommandResult.CloseApp(extractCloseAppName(text)!!)
+            extractCloseAppName(text) != null ->
+                CommandResult.CloseApp(extractCloseAppName(text)!!)
 
             matches(text, "cierra esta app", "cierra la app actual", "cierra esto",
                 "cierra la app que esté abierta", "cierra lo que hay delante") ->
@@ -82,7 +173,8 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
             extractAppName(text) != null -> CommandResult.OpenApp(extractAppName(text)!!)
             appLauncher?.hasApp(text) == true -> CommandResult.OpenApp(text)
 
-            matches(text, "descansa", "descanso", "descansar", "cansa", "duerme", "dormir") ->
+            matches(text, "descansa", "descanso", "descansar",
+                "cansa", "duerme", "dormir") ->
                 CommandResult.Sleep
 
             matches(text, "inteligente", "piper", "neuronal", "natural") ->

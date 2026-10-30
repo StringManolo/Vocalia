@@ -60,32 +60,62 @@ class VocaliaService : Service() {
         ttsManager.init()
     }
 
-
-        private fun buildGrammar(appNames: List<String>, aliases: Set<String>): String {
+    private fun buildGrammar(appNames: List<String>, aliases: Set<String>): String {
         val commands = mutableListOf(
-            // Wake words (vocalia / boca lia)
+            // Wake words
             "vocalia", "vocalía", "boca lia", "boca lía", "bocalia",
-            // Comandos
+            // Comandos generales
             "que hora es", "que hora", "la hora", "hora es",
             "que dia es", "que dia", "que fecha", "fecha",
-            "descansa", "descanso", "descansar", "cansa", "duerme", "dormir", "silencio", "callate",
+            "descansa", "descanso", "descansar", "cansa", "duerme", "dormir",
+            "silencio", "callate",
             "hola", "que tal", "como estas",
-            "usa voz inteligente", "voz inteligente", "usa voz por defecto", "voz por defecto",
+            "usa voz inteligente", "voz inteligente",
+            "usa voz por defecto", "voz por defecto",
             "escucha continua", "modo continuo", "escucha constante",
-            "sal de escucha continua", "desactiva escucha continua", "desactiva modo continuo",
-            "pausa el tts", "pausa el texto", "pausa la lectura", "pausa lectura", "pausa voz",
+            "sal de escucha continua", "desactiva escucha continua",
+            "desactiva modo continuo",
+            "pausa el tts", "pausa el texto", "pausa la lectura",
+            "pausa lectura", "pausa voz",
             "para el tts", "para el texto", "para la lectura",
             "pausa", "para", "parar", "pausar",
-            "continua el tts", "continua el texto", "continua la lectura", "continua lectura", "continua voz",
-            "reanuda el tts", "reanuda la lectura", "sigue leyendo", "continua", "reanuda", "sigue",
-            "lista apps", "lista de apps", "que apps tengo", "lista de aplicaciones",
-            "listame las apps", "lista de apps disponibles", "todas las apps", "todas las aplicaciones",
+            "continua el tts", "continua el texto", "continua la lectura",
+            "continua lectura", "continua voz",
+            "reanuda el tts", "reanuda la lectura", "sigue leyendo",
+            "continua", "reanuda", "sigue",
+            "lista apps", "lista de apps", "que apps tengo",
+            "lista de aplicaciones", "listame las apps",
+            "lista de apps disponibles", "todas las apps",
+            "todas las aplicaciones",
             "cierra esta app", "cierra la app actual", "cierra esto",
             "cierra la app que esté abierta", "cierra lo que hay delante",
             "ayuda", "que puedes hacer", "que sabes hacer",
             "dime todo lo que puedes hacer", "dime lo que puedes hacer",
-            "guia", "comandos", "lista de comandos",
-            "que comandos tienes"
+            "guia", "comandos", "lista de comandos", "que comandos tienes",
+
+            // === Modo usar (UI navigation) ===
+            "modo usar", "activar modo usar", "activa el modo usar",
+            "entra al modo usar", "entrar al modo usar",
+            "modo navegacion", "modo navegación",
+            "activar modo navegacion", "activa el modo navegacion",
+            "sal del modo usar", "salir del modo usar", "salir del modo",
+            "desactiva el modo usar", "termina el modo usar", "fin del modo usar",
+            "sal del modo navegacion", "salir del modo navegacion",
+            "siguiente", "avanza", "siguiente elemento", "el siguiente",
+            "anterior", "retrocede", "anterior elemento", "el anterior",
+            "lee", "leer", "lee elemento", "leer elemento", "léelo", "leelo",
+            "pulsa", "pulsar", "toca", "tocar",
+            "activa elemento", "activar elemento", "click", "clic",
+            "atrás", "atras", "back", "regresa", "volver atrás", "vuelve atrás",
+            "arrastra arriba", "arrastra abajo",
+            "arrastra izquierda", "arrastra derecha",
+            "arrastra elemento arriba", "arrastra elemento abajo",
+            "arrastra elemento izquierda", "arrastra elemento derecha",
+            "scroll arriba", "scroll abajo",
+            "desplaza arriba", "desplaza abajo",
+            "sube", "baja",
+            "pega", "pegar", "portapapeles pegar",
+            "pega el portapapeles", "pega del portapapeles"
         )
 
         val added = mutableSetOf<String>()
@@ -148,7 +178,10 @@ class VocaliaService : Service() {
     private fun startForegroundCompat() {
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            startForeground(
+                NOTIFICATION_ID, notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }

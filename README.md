@@ -8,7 +8,7 @@
 
 **Última versión estable:** [`v0.4.0-vocalia`](https://github.com/StringManolo/Vocalia/releases)
 
-APK directo: [`debug-apk.zip`](https://github.com/StringManolo/Vocalia/releases/download/V0.0.0-debug/debug-apk.zip)
+APK directo: [`debug-apk.zip`](https://github.com/StringManolo/Vocalia/releases/download/V0.4.0-vocalia/debug-apk.zip)
                                                                                         > ⚠️ La APK está firmada con clave de debug. Android mostrará un aviso al instalar. Es normal: la app es sideload, no viene de Play Store. Quizás necesites desactivar playprotect para permitir la instalación.
 
 ---

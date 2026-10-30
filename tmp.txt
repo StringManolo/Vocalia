@@ -1,0 +1,43 @@
+cat >> deepseek_context.txt << 'EOF'
+===== AndroidManifest.xml =====
+EOF
+cat app/src/main/AndroidManifest.xml >> deepseek_context.txt
+
+for f in \
+  path/al/VocaliaAccessibilityService.kt \
+  path/al/CommandDispatcher.kt \
+  path/al/ModeManager.kt \
+  path/al/AppLauncher.kt \
+  path/al/SpeechRecognitionService.kt \
+  path/al/TtsService.kt \
+  app/build.gradle.kts ; do
+  { echo; echo "===== $f ====="; cat "$f"; } >> deepseek_context.txt
+done
+
+
+(15:54:22:7385) /root/vocalia
+> tree app/src/main/java/io/github/stringmanolo/vocalia/
+app/src/main/java/io/github/stringmanolo/vocalia/
+├── BootReceiver.kt
+├── core
+│   ├── AppLauncher.kt
+│   ├── CommandParser.kt
+│   └── VocaliaCore.kt
+├── LogActivity.kt
+├── MainActivity.kt
+├── tts
+│   ├── EspeakNgEngine.kt
+│   ├── SherpaOnnxEngine.kt
+│   ├── TtsEngine.kt
+│   └── TtsManager.kt
+├── util
+│   ├── CrashHandler.kt
+│   ├── InternalDebug.kt
+│   └── VocaliaLogger.kt
+├── VocaliaAccessibilityService.kt
+├── VocaliaApp.kt
+├── VocaliaService.kt
+├── VoskEngine.kt
+└── WatchdogReceiver.kt
+
+4 directories, 18 files
