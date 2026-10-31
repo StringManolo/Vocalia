@@ -26,7 +26,13 @@ Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
 3 Sistema de dictado (te relee lo que llevar escrito y demás. Básicamente es como vi/vim pero interno por voz, y una vez confirmado te permite usar el texto por etiquetas). Por ejemplo: Pega el texto1. Pega el Texto2. Lee el texto2. Borra el texto2. Edita el Texto1. ...
 
 #### general
+- Maneja lectura de credenciales (no se quiere que se lean por defecto -ya que si estás en público, alguien podría escucharlas-, requiere modo **sudo**)
+
+- Añadir cursor al modo **USAR** para circunventar problemas de elementos no clickables. Permitir programarlo en caliente (para guardar ajustes. Por ejemplo para pulsar chats en concreto en Telegram usando el feedback de leer todo) (Elementos personalizados que se añaden a a un archivo de configuración accesible / sdcard / shared / shared / shared / shared / shared / shared / shared / shared)
+
 - Necesita feedback por TTS de cuando entra al modo USAR (entra y va, pero el usuario no lo sabe)
+
+- Los permisos UI son confusos dado que aparecen a la vez, aplazar uno de ellos
 
 - Diseñar iconos de la app, pagina web, y demás
 

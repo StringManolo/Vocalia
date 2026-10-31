@@ -1,6 +1,6 @@
 # Roadmap de Vocalia
 
-**Documento vivo.** Última actualización: Fase 1.3 completada (v0.4.0-vocalia).
+**Documento vivo.** Última actualización: Fase 2.0 completada (v0.5.0-vocalia).
 
 Este documento describe la visión, las fases, las decisiones técnicas y los casos límite que guían el desarrollo de Vocalia. Se actualiza al cerrar cada fase.
 
@@ -23,6 +23,7 @@ Construir un asistente de voz **totalmente offline y sin dependencias de Google*
 4. **Robusto.** Si un componente falla, el resto sigue vivo. Watchdog, fallbacks, recuperación automática.
 5. **Instalable por un tercero sin conocimientos técnicos.** El objetivo final es un APK que cualquiera pueda instalar en el móvil de una persona ciega en 5 minutos.
 6. **Open source (GPLv3 para uso personal).** Uso comercial con licencia aparte negociada caso por caso.
+7. **El feedback por voz debe bastar.** Cada elemento, estado y acción tiene que poder entenderse solo con el audio.
 
 ---
 
@@ -110,7 +111,7 @@ Objetivo: abrir/cerrar cualquier app instalada por voz, listar apps, y poder pau
   - `lístame las apps` → como el anterior + log de alias por app.
 - [x] **Wake word cambiada a `vocalia`** con variantes transcripcionales que produce Vosk: `vocalia`, `vocalía`, `boca lia`, `boca lía`, `bocalia`. Solo se matchea al **inicio** del texto.
 - [x] Gramática dinámica de Vosk generada en `VocaliaService.buildGrammar()` con: wake words + comandos fijos + todas las apps instaladas + todos los aliases, en variantes con y sin tildes, con prefijos `abre`/`cierra`/etc.
-- [x] **Chunking por frase en `TtsManager`**: el texto se trocea en frases (`. ! ?`), uniendo frases cortas hasta ~240 caracteres, partiendo frases largas por `,` `;` `:` o espacio.
+- [x] **Chunking por frase en `TtsManager`**: el texto se trocea en frases, uniendo frases cortas hasta ~240 caracteres, partiendo frases largas por `,` `;` `:` o espacio.
 - [x] **Pausa / reanudación del TTS**:
   - `vocalia pausa` / `detente` / `stop` / `silencio`… → `ttsManager.pause()` + estado `TTS_PAUSED`.
   - `vocalia continúa` → `ttsManager.resumePaused()`, reanuda desde el chunk/frase en curso.
@@ -131,9 +132,74 @@ Objetivo: abrir/cerrar cualquier app instalada por voz, listar apps, y poder pau
 
 ---
 
+### ✅ Fase 2.0 — Modo usar (`AccessibilityService`)
+
+**Estado:** completada (v0.5.0-vocalia).
+
+Objetivo: leer y controlar cualquier app por voz, sin tocar la pantalla.
+
+**Servicio y estados**
+- [x] `VocaliaAccessibilityService`: recorre el árbol de `AccessibilityNodeInfo` de la ventana activa y mantiene la lista de elementos (interactivos o con texto, máx. 120).
+- [x] Nuevo estado `UI_NAVIGATION` en `VocaliaCore` con gramática reducida y timeout por inactividad.
+- [x] `vocalia, modo usar` / `vocalia, sal del modo usar`. Al salir se vuelve a escucha continua si estaba activa, o a `IDLE`.
+- [x] **Wake word obligatoria en modo usar**, salvo en escucha continua (`continuousEnabled`). Si se dice solo "vocalia", pitido y ventana corta para el comando siguiente.
+
+**Navegación y acciones**
+- [x] `siguiente` / `anterior` (circular), `lee`, `detalle`, `pulsa`, `atrás`, `arrastra arriba/abajo/izquierda/derecha`, `portapapeles pegar`.
+- [x] **La posición del elemento actual se conserva** entre comandos. La lista solo se refresca al entrar en el modo y tras acciones que pueden cambiar la pantalla (pulsar, atrás, desplazar). Si el nodo actual queda obsoleto, se reconstruye la lista conservando el índice.
+- [x] Recorrido del árbol en profundidad (preorden) para seguir el **orden de lectura visual**.
+- [x] Los nodos de solo texto bajo un contenedor pulsable se omiten (su texto forma parte del nombre del contenedor).
+
+**Feedback por voz (nombres accesibles)**
+- [x] Nombre del elemento como un lector de pantalla: `contentDescription`/texto → `labeledBy` → tooltip → texto de descendientes → pista del campo → identificador de la vista (avisando de que es deducido).
+- [x] Tipo (botón, botón con icono, campo de texto, interruptor, casilla, lista, imagen…) y estado (marcado, seleccionado, desactivado, `stateDescription`).
+- [x] Campos de texto: nombre = etiqueta/pista; contenido aparte ("contiene …" / "vacío"). **Las contraseñas nunca se leen**, solo su longitud.
+- [x] `detalle`: acciones posibles, posición en pantalla, "elemento N de M", identificador.
+- [x] `SpeechText`: URLs habladas ("punto", "barra"), saltos de línea → comas, recorte de textos largos.
+
+**Elementos numerados y búsqueda**
+- [x] `lee todo`: numera la interfaz y la lee ("La interfaz tiene X elementos. Botón 1: …"). Los números persisten hasta el siguiente `lee todo`.
+- [x] Comandos por número: `elemento N, pulsa | lee | detalle | arrastra <dirección>` (y orden inverso: `pulsa elemento N`). Números en palabras o cifras, hasta 120.
+- [x] `busca elemento con texto X`: selecciona la primera coincidencia y dice "botón N: nombre"; si hay varias, dice cuántas y sus números.
+- [x] **Gramática en caliente**: las palabras de los nombres de los elementos en pantalla (hasta 150) se añaden a la gramática de Vosk del modo usar, para poder reconocerlas sin haberlas dicho antes.
+
+**Ayuda contextual**
+- [x] `vocalia ayuda` dentro del modo usar lee la ayuda del modo usar; `vocalia, modo usar ayuda` desde cualquier estado.
+
+**Corrección en el TTS (encontrada en pruebas)**
+- [x] `TtsManager.splitIntoChunks` descartaba el texto posterior a la última puntuación (`[^.!?]+[.!?]+`), cortando las lecturas largas. Ahora el resto final cuenta como frase y un punto solo parte la frase si va seguido de espacio o fin de texto.
+
+**Notas técnicas críticas:**
+- **Reiniciar la lista en cada vuelta a `UI_NAVIGATION` reseteaba `currentIndex` a 0**: "siguiente" siempre iba al elemento 1. La lista debe refrescarse solo cuando la pantalla ha podido cambiar.
+- **Wake word en modo usar:** aceptar cualquier comando sin "vocalia" hace que el eco o las conversaciones cercanas disparen acciones. Solo la escucha continua, activada explícitamente, lo permite.
+- **BFS mezcla niveles del árbol** y rompe el orden de lectura; el preorden (DFS) lo respeta.
+- **Numeración vs. refresco:** hay dos listas. La de navegación (`interactiveNodes`) se refresca con la pantalla; la numerada (`numbered`) es una instantánea que solo cambia con `lee todo` o una búsqueda. Si un nodo numerado ya no es válido (`node.refresh()` falla), se pide renumerar en vez de actuar sobre un elemento equivocado.
+- `viewIdResourceName` solo está disponible con `flagReportViewIds` en `accessibility_service_config.xml`.
+- Las APIs `hintText`, `tooltipText`, `paneTitle` y `stateDescription` requieren API 26, 28, 28 y 30: se protegen con `Build.VERSION.SDK_INT` (el mínimo es API 24).
+- Vosk solo reconoce palabras presentes en el vocabulario del modelo; los nombres raros o de marcas pueden no poder buscarse por voz.
+- `isVisibleToUser` y los contenedores pulsables sin texto propio varían mucho entre apps: el árbol de accesibilidad es frágil y hay que probarlo en cada app.
+
+---
+
+### 🚧 Fase 2.1 — Modo usar: elementos difíciles y por app
+
+**Estado:** siguiente a empezar.
+
+Objetivo: que ningún elemento quede sin describir ni sea inalcanzable.
+
+- [ ] **Ficheros de descripción por app** (por nombre de paquete): asocian el identificador o el texto de una vista a una descripción corta y otra larga, para apps con iconos sin etiqueta. Se piden por voz ("describe elemento 4" → descripción larga).
+- [ ] **Etiquetar por voz**: "etiqueta este elemento como …" guarda la etiqueta en el fichero de la app.
+- [ ] Pulsar por coordenadas / `dispatchGesture` para elementos que no exponen `ACTION_CLICK`.
+- [ ] Escribir por voz en el campo seleccionado (`ACTION_SET_TEXT`) y atajos de edición.
+- [ ] Avisar por voz de los cambios de pantalla importantes (diálogos, cambios de ventana).
+- [ ] Cambiar entre ventanas / notificaciones / barra de estado.
+- [ ] Renumeración automática opcional al detectar cambio de pantalla.
+
+---
+
 ### 🚧 Fase 1.4 — Dictado libre con buffer navegable
 
-**Estado:** siguiente a empezar. La base del chunking por frase ya está lista en `TtsManager`.
+**Estado:** planificada. La base del chunking por frase ya está lista en `TtsManager`.
 
 Objetivo: dictar texto libre y poder navegarlo, editarlo y usarlo. Además, extender la navegación del TTS actual con comandos de transporte.
 
@@ -158,7 +224,8 @@ Objetivo: dictar texto libre y poder navegarlo, editarlo y usarlo. Además, exte
 - [ ] Feedback: leer cada frase dictada (configurable on/off).
 
 **Notas:**
-- El chunking por frase de Fase 1.3 es deliberadamente la pieza reutilizable aquí: `TtsManager.getChunks()` + `getCurrentChunkIndex()` dan todo lo necesario para implementar repetición y salto de frases sin tocar la lógica de reproducción.
+- El chunking por frase es deliberadamente la pieza reutilizable aquí: `TtsManager.getChunks()` + `getCurrentChunkIndex()` dan todo lo necesario para implementar repetición y salto de frases sin tocar la lógica de reproducción.
+- Cuidado con los comandos que ya existen en el modo usar ("lee todo", "busca elemento…"): el dictado deberá usar otro espacio de nombres o un estado propio.
 - Vosk modelo small tiene precisión limitada. Para dictado serio, evaluar:
   - Modelo Vosk `large` (1.4 GB, ~500 MB RAM).
   - **Whisper.cpp en modo batch** (graba frase → transcribe, ~1-2 s por frase, 244 MB modelo small int8).
@@ -180,34 +247,6 @@ Objetivo: dictar texto libre y poder navegarlo, editarlo y usarlo. Además, exte
 - [ ] "busca en Google [término]" → `Intent.ACTION_WEB_SEARCH` (o navegador directo).
 - [ ] "reproduce [canción] en YouTube" → `yt-dlp` + `mpv` en Termux (Fase 3).
 - [ ] "llama a [contacto]" → `Intent.ACTION_CALL` (requiere `READ_CONTACTS`).
-
----
-
-### 🔮 Fase 2 — `AccessibilityService` (lectura de pantalla)
-
-**Estado:** planificada.
-
-Objetivo: leer cualquier app y controlarla por voz.
-
-- [ ] `VocaliaAccessibilityService`:
-  - `onAccessibilityEvent` para capturar cambios.
-  - Recorrer el árbol de `AccessibilityNodeInfo`.
-  - Extraer texto, `contentDescription`, roles, coordenadas.
-- [ ] Lector de pantalla modular con buffer navegable:
-  - "¿qué hay en pantalla?" → describe el árbol.
-  - "toca [texto]" → busca nodo y ejecuta `ACTION_CLICK`.
-  - "desliza arriba/abajo" → `ACTION_SCROLL_FORWARD/BACKWARD`.
-  - "mueve cursor derecha/izquierda" → navegación por foco.
-  - "¿qué hay bajo el cursor?" → lee el nodo con foco de accesibilidad.
-- [ ] Modo "clic por exploración" para usuarios sin manos:
-  - Resalta elementos interactivos uno a uno, los lee.
-  - Usuario dice "clic" cuando oye el que quiere.
-- [ ] Selectores específicos por app si la accesibilidad genérica falla.
-
-**Notas:**
-- Esta fase es la que permite usar **cualquier app**, no solo las que tienen API pública.
-- El árbol de accesibilidad es frágil: cambia entre versiones de apps. Hay que testear.
-- Alternativa/complemento: `uiautomator2` vía ADB local en Termux (menos elegante, más rápido de prototipar).
 
 ---
 
@@ -236,6 +275,7 @@ Objetivo: programar por voz en vim, compilar, gestionar git, todo desde el móvi
 **Notas:**
 - Termux **no es obligatorio** para el usuario ciego sin manos. Es una capa extra para el usuario programador.
 - El buffer navegable de Fase 1.4 se reutiliza aquí para leer salidas largas.
+- El modo usar (Fase 2) ya permite leer y pulsar elementos de la propia app Termux; esta fase añade un canal más fiable para terminal.
 
 ---
 
@@ -267,6 +307,7 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 
 - [ ] APK "todo en uno" con modelos embebidos (Vosk + espeak + Sherpa).
 - [ ] Guía de instalación por voz: la app lee los pasos y guía al usuario.
+- [ ] Activación guiada del servicio de accesibilidad (requisito del modo usar).
 - [ ] Configuración inicial por voz:
   - Idioma (español/inglés).
   - Números de emergencia (grave/leve).
@@ -314,6 +355,7 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 | **TTS neuronal** | Sherpa-onnx 1.13.4 + Piper `es_ES-miro-high` | Voz natural, offline, ~250 MB RAM. |
 | **Audio** | `AudioTrack` nativo | Control total. `MODE_STREAM` + PCM 16-bit + `CONTENT_TYPE_MUSIC`. |
 | **Chunking TTS** | Por frase (~240 chars) | Pausas naturales + base para navegación futura. |
+| **Control de apps** | `AccessibilityService` | Único método sin root ni ADB que funciona en cualquier app. |
 | **Compilación** | GitHub Actions | Sin PC. Edición desde Termux. |
 | **Logs** | `InternalDebug` (disco) | logcat no accesible en producción. |
 | **Estado** | Máquina de estados en `VocaliaCore` | Separación clara de responsabilidades. |
@@ -344,6 +386,13 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 - ❌ **`speak()` rechazado por `speaking = true` tras un `pause()`**: el hilo de chunk seguía vivo y bloqueaba cualquier reanudación. Solución: `stop()` síncrono con `join(2000)` + `pendingChunks` en `TtsManager`.
 - ❌ **Buscar wake word con `indexOfFirst` en todo el texto**: confundía `abre vocalia` con wake word. Solución: `startsWith`.
 - ❌ **`ResumeTts` ignorado si el estado ya no era `TTS_PAUSED`** (porque el usuario ejecutó otro comando por medio). Solución: `ttsManager.hasPausedSpeech()` en `handleCommand` para reanudar desde `IDLE` si hay buffer pendiente.
+- ❌ **Trocear frases con `[^.!?]+[.!?]+`**: descarta todo lo que viene después de la última puntuación y parte las URLs por sus puntos. Solución: cortar solo en `. ! ?` seguidos de espacio o fin de texto, y conservar el resto final.
+- ❌ **Refrescar la lista de nodos cada vez que se vuelve a `UI_NAVIGATION`**: resetea el índice a 0 y "siguiente" nunca avanza. Solución: refrescar solo al entrar o tras acciones que cambian la pantalla.
+- ❌ **Aceptar comandos sin wake word en modo usar**: cualquier ruido o conversación ejecuta acciones. Solución: exigirla salvo en escucha continua.
+- ❌ **Recorrer el árbol de accesibilidad en BFS**: mezcla niveles y desordena la lectura. Solución: preorden (DFS).
+- ❌ **Leer solo "botón" para un elemento**: sin nombre no sirve para un usuario ciego. Solución: nombre accesible con varias fuentes, descendientes y, como último recurso, el identificador de la vista.
+- ❌ **Leer el contenido de campos de contraseña**: nunca. Solo se dice su longitud.
+- ❌ **Renumerar elementos en cada refresco**: los números dejarían de corresponder a lo que oyó el usuario. Solución: instantánea numerada separada, que solo cambia con `lee todo` o una búsqueda.
 
 ---
 
@@ -353,15 +402,18 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 
 - **Conducción:** la legalidad del uso de dispositivos manos libres varía por país. Vocalia **no se hace responsable** del uso que se le dé. El README y `LEGALITY.md` advierten de que el usuario debe consultar la normativa de su país.
 - **Grabación de audio:** la app no envía audio a la nube. Todo se procesa offline. No hay grabaciones persistentes más allá del buffer temporal en RAM.
-- **Datos personales:** el `INTERNAL_DEBUG_FILE` puede contener texto reconocido por Vosk. El usuario es responsable de borrarlo si lo comparte.
+- **Datos personales:** el `INTERNAL_DEBUG_FILE` puede contener texto reconocido por Vosk y descripciones de elementos de pantalla (nombres, URLs, contenido de campos de texto). El usuario es responsable de borrarlo si lo comparte.
+- **Accesibilidad:** el servicio de accesibilidad da acceso al contenido de la pantalla. Vocalia lo usa solo en local, no envía nada fuera del dispositivo y no lee contraseñas.
 
 ### Técnicos
 
 - **Memoria:** Vosk small (~400 MB) + Sherpa (~250 MB) + espeak (~30 MB) + Android + app pueden acercarse a 1 GB. En un P40 Lite con 4 GB va, pero el sistema puede matar procesos en segundo plano bajo presión.
 - **Batería:** Vosk con micrófono siempre activo consume. Se recomienda cargar el móvil mientras se conduce.
 - **Micrófono + altavoz simultáneos:** funciona en el P40 Lite. Otros dispositivos pueden requerir `MODE_IN_COMMUNICATION` y `speakerphone`. Hay que testear por dispositivo.
-- **Eco del TTS en Vosk:** el altavoz se cuela por el micrófono y Vosk transcribe el propio TTS. Mitigaciones: (1) anti-eco por wake word en `TTS_SPEAKING`; (2) TTS bloqueante en `Ayuda`; (3) en el futuro, AEC por hardware o cancelación de eco en software si aparecen más casos.
+- **Eco del TTS en Vosk:** el altavoz se cuela por el micrófono y Vosk transcribe el propio TTS. Mitigaciones: (1) anti-eco por wake word en `TTS_SPEAKING`; (2) TTS bloqueante en `Ayuda`; (3) en el futuro, AEC por hardware o cancelación de eco en software si aparecen más casos. Con lecturas largas (`lee todo`), para detener hay que decir "vocalia para".
 - **Wake word en entornos ruidosos:** el modelo small puede fallar. Opciones: modelo Vosk large, o wake word de dos palabras.
+- **Gramática dinámica del modo usar:** crece con los nombres de los elementos (tope de 150 palabras). Las palabras fuera del vocabulario de Vosk se ignoran y no se podrán buscar por voz.
+- **Árbol de accesibilidad:** cada app lo construye distinto. Apps con WebView, juegos o interfaces propias (Flutter, Unity) pueden exponer pocos o ningún nodo.
 - **Idioma:** Vosk y Piper son monolingües por modelo. Cambiar de idioma requiere cargar otro modelo. Planificado para Fase 1.5+.
 - **Modelo Vosk small vs large:** el small es rápido pero limitado. Para dictado serio, evaluar Whisper.cpp en batch o Sherpa ASR.
 
@@ -369,6 +421,7 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
 
 - **Firma de debug:** el APK no está firmado con clave de release. Android muestra aviso al instalar. Aceptable para sideload.
 - **Huawei/EMUI:** requiere configuración manual de batería (documentado en README). Sin esto, el servicio muere en minutos.
+- **Servicio de accesibilidad:** hay que activarlo a mano en Ajustes → Accesibilidad. Android puede desactivarlo si la app se actualiza o se fuerza su cierre.
 - **Xiaomi/MIUI:** problema similar. Habrá que documentar los pasos por fabricante.
 
 ---
@@ -390,7 +443,7 @@ Objetivo: que un tercero sin conocimientos técnicos pueda instalar Vocalia en e
    ```kotlin
    matches(text, "tu-comando") -> CommandResult.Response("respuesta")
    ```
-2. Añade la variante a la gramática en `VocaliaService.kt` (`buildGrammar()`):
+2. Añade la variante a la gramática en `VocaliaService.kt` (`buildGrammar()`). Si es un comando del modo usar, añádela a `GRAMMAR_UI_NAVIGATION` en `VocaliaCore.kt`:
    ```kotlin
    "tu-comando", "variante1", "variante2",
    ```
@@ -414,6 +467,14 @@ La infraestructura ya está lista en `TtsManager`:
 
 Para añadir "repite la última frase", extiende `TtsManager` con un método `repeatChunks(n)` que re-emita `chunks.subList(currentIndex - n, currentIndex)` y conéctalo a un nuevo `CommandResult`.
 
+### Mejorar la descripción de elementos del modo usar
+
+La lógica está en `VocaliaAccessibilityService`:
+- `accessibleName()` → de dónde sale el nombre (añade aquí nuevas fuentes).
+- `roleOf()` / `stateOf()` → tipo y estado hablados.
+- `describeNode()` (breve), `describeNumbered()` (listas) y `describeCurrentNodeDetailed()` (detalle).
+- `SpeechText.speakable()` → cómo se pronuncian URLs y textos largos.
+
 ### Traducir a otro idioma
 
 1. Añade el modelo Vosk del idioma en `assets/`.
@@ -431,9 +492,10 @@ Para añadir "repite la última frase", extiende `TtsManager` con un método `re
 | Fase 1.1 | ✅ | espeak-ng español |
 | Fase 1.2 | ✅ | Wake word, comandos, TTS dual |
 | Fase 1.3 | ✅ | Abrir/cerrar apps, listar apps, pausa/reanudación TTS, chunking por frase, ayuda bloqueante |
+| Fase 2.0 | ✅ | Modo usar: navegación, nombres accesibles, elementos numerados, búsqueda, gramática en caliente, ayuda propia |
+| Fase 2.1 | 🚧 | Descripciones por app, etiquetado por voz, gestos |
 | Fase 1.4 | 🚧 | Dictado libre + navegación por frases |
 | Fase 1.5 | 🚧 | Comandos de sistema |
-| Fase 2 | 🔮 | AccessibilityService |
 | Fase 3 | 🔮 | Termux + terminal |
 | Fase 4 | 🔮 | Sherpa en proceso separado |
 | Fase 5 | 🔮 | Instalador todo en uno |
@@ -451,6 +513,7 @@ Para añadir "repite la última frase", extiende `TtsManager` con un método `re
 | `v0.0.0-debug` | — | Release de pruebas iniciales |
 | `v0.3.0-sherpa` | — | Wake word + comandos + TTS dual |
 | `v0.4.0-vocalia` | — | Abrir/cerrar apps, listar apps, pausa/reanudación TTS, chunking por frase, ayuda bloqueante |
+| `v0.5.0-vocalia` | 2026-10-31 | Modo usar con AccessibilityService: navegación con posición persistente, nombres accesibles, `lee todo` con elementos numerados, búsqueda por texto con gramática en caliente, ayuda del modo usar, wake word obligatoria salvo escucha continua, arreglo del corte del TTS |
 
 ---
 
