@@ -50,6 +50,8 @@ class VocaliaCore(
             "recarga configuración", "recarga la configuración", "recarga configuracion",
             "estado de la configuración", "información de la configuración",
             "pulsa en", "toca en", "toca", "en", "de", "la", "lista",
+            "pantalla", "pantalla automática", "pantalla actual", "qué pantalla es",
+            "en qué pantalla estoy", "detecta la pantalla", "qué", "es", "estoy",
             "un", "uno", "una", "dos", "tres", "cuatro", "cinco", "seis", "siete",
             "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince",
             "dieciséis", "diecisiete", "dieciocho", "diecinueve", "veinte",
@@ -116,7 +118,10 @@ class VocaliaCore(
             "Si la aplicación tiene cursores configurados: cursor, y su nombre, por ejemplo cursor primer chat, " +
             "te coloca en él, y después pulsa, lee, detalle o arrastra. " +
             "También puedes pulsar directamente: pulsa, y el nombre del cursor. " +
-            "Para oír qué cursores tiene la aplicación: lee cursores. " +
+            "Cada aplicación puede tener varias pantallas, cada una con sus cursores. " +
+            "Para saber en cuál estás: qué pantalla es. Para forzarla: pantalla, y su nombre. " +
+            "Para volver a la detección automática: pantalla automática. " +
+            "Para oír qué cursores tiene la pantalla actual: lee cursores. " +
             "Si has editado los ficheros de configuración: recarga configuración. " +
             "Para diagnosticar: estado de la configuración. " +
             "Para pegar: portapapeles pegar. " +
@@ -681,6 +686,17 @@ class VocaliaCore(
             is CommandResult.UiCursor -> a11yCommand { it.cursorTo(parsed.phrase) }
             is CommandResult.UiPressPhrase -> a11yCommand(refreshAfter = true) { it.pressByPhrase(parsed.phrase) }
             CommandResult.UiListCursors -> a11yCommand { it.listCursors() }
+            is CommandResult.UiScreen -> a11yCommand {
+                val msg = it.screenTo(parsed.name)
+                dynamicUiWords = it.getVocabulary()
+                msg
+            }
+            CommandResult.UiScreenAuto -> a11yCommand {
+                val msg = it.screenAuto()
+                dynamicUiWords = it.getVocabulary()
+                msg
+            }
+            CommandResult.UiScreenInfo -> a11yCommand { it.screenInfo() }
             CommandResult.UiReloadConfig -> a11yCommand {
                 val msg = it.reloadConfig()
                 dynamicUiWords = it.getVocabulary()

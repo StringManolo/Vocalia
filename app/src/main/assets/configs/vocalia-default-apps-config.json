@@ -1,6 +1,6 @@
 {
-  "schema": 1,
-  "_nota": "Configuración por defecto para TODOS los dispositivos. Se usan porcentajes (xPct/yPct) para que valga en cualquier pantalla. Los valores de ejemplo son ESTIMACIONES: calibra con 'lee todo' y 'elemento N, detalle' (dan las coordenadas) y corrige aquí o en el fichero de tu dispositivo.",
+  "schema": 2,
+  "_nota": "Configuración por defecto para TODOS los dispositivos. Porcentajes (xPct/yPct) para que valga en cualquier pantalla. Cada app tiene PANTALLAS con sus propios cursores. Calibra con 'lee todo' + 'elemento N, detalle' y corrige aquí o en el fichero de tu dispositivo. Las reglas 'detect' de las pantallas de Telegram son ESTIMACIONES: si no se reconoce la pantalla, usa 'vocalia, pantalla ajustes' y mira en el log las líneas 'pantalla ->' (muestran textos, descripciones e ids visibles) para escribir reglas mejores.",
   "devices": {
     "default": {
       "apps": {
@@ -8,46 +8,165 @@
           "canonical-name": "org.telegram.messenger.web",
           "packages": ["org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.messenger.beta"],
           "version": "13.1.0",
-          "description": "Telegram, lista de chats",
-          "ui": {
-            "menu": {
-              "gramatica": ["menú", "botón hamburguesa", "abrir menú"],
-              "descripcion": "Botón de menú, arriba a la izquierda",
-              "descripcionLarga": "Abre el menú lateral con ajustes, contactos y cuentas.",
-              "xPct": 8, "yPct": 6
-            },
-            "buscar": {
-              "gramatica": ["buscar", "lupa", "búsqueda"],
-              "descripcion": "Lupa de búsqueda, arriba a la derecha",
-              "xPct": 92, "yPct": 6
-            },
-            "chat1": {
-              "gramatica": ["primer chat", "chat uno"],
-              "descripcion": "Primer chat del listado",
-              "descripcionLarga": "El chat más reciente de la lista. Al pulsarlo se abre la conversación.",
-              "xPct": 50, "yPct": 14
-            },
-            "chat2": {
-              "gramatica": ["segundo chat", "chat dos"],
-              "descripcion": "Segundo chat del listado",
-              "xPct": 50, "yPct": 21
-            },
-            "chat3": {
-              "gramatica": ["tercer chat", "chat tres"],
-              "descripcion": "Tercer chat del listado",
-              "xPct": 50, "yPct": 28
-            },
-            "nuevoMensaje": {
-              "gramatica": ["nuevo mensaje", "botón redactar", "lápiz"],
-              "descripcion": "Botón flotante para escribir un mensaje nuevo, abajo a la derecha",
-              "xPct": 87, "yPct": 91
+          "description": "Telegram",
+
+          "groups": {
+            "pestanas": {
+              "chats": {
+                "gramatica": ["boton chats", "chats", "pestaña de chats"],
+                "descripcion": "Botón pestaña de chats",
+                "xPct": 20, "yPct": 96
+              },
+              "contactos": {
+                "gramatica": ["boton contactos", "contactos", "pestaña de contactos"],
+                "descripcion": "Botón pestaña de contactos",
+                "xPct": 40, "yPct": 96
+              },
+              "ajustes": {
+                "gramatica": ["boton ajustes", "ajustes", "pestaña de ajustes"],
+                "descripcion": "Botón pestaña de ajustes",
+                "xPct": 60, "yPct": 96
+              },
+              "perfil": {
+                "gramatica": ["boton perfil", "perfil", "pestaña de perfil"],
+                "descripcion": "Botón pestaña de perfil",
+                "xPct": 80, "yPct": 96
+              }
             }
           },
-          "versions": {
-            "13.1.0": {
+
+          "ui": {},
+
+          "screens": {
+            "listaChats": {
+              "default": true,
+              "gramatica": ["lista de chats", "pantalla principal", "principal"],
+              "descripcion": "Lista de chats de Telegram",
+              "include": ["pestanas"],
               "ui": {
-                "chat1": { "_nota": "Aquí iría un ajuste solo para la versión 13.1.0 o posteriores" }
+                "menu": {
+                  "gramatica": ["menú", "botón hamburguesa", "abrir menú"],
+                  "descripcion": "Botón de menú, arriba a la izquierda",
+                  "descripcionLarga": "Abre el menú lateral con ajustes, contactos y cuentas.",
+                  "xPct": 8, "yPct": 6
+                },
+                "buscar": {
+                  "gramatica": ["buscar", "lupa", "búsqueda"],
+                  "descripcion": "Lupa de búsqueda, arriba a la derecha",
+                  "xPct": 85, "yPct": 6
+                },
+                "chat1": {
+                  "gramatica": ["primer chat", "chat uno"],
+                  "descripcion": "Primer chat del listado",
+                  "descripcionLarga": "El chat más reciente de la lista. Al pulsarlo se abre la conversación.",
+                  "xPct": 50, "yPct": 28
+                },
+                "chat2": { "gramatica": ["segundo chat", "chat dos"],   "descripcion": "Segundo chat del listado", "xPct": 50, "yPct": 35 },
+                "chat3": { "gramatica": ["tercer chat", "chat tres"],   "descripcion": "Tercer chat del listado",  "xPct": 50, "yPct": 42 },
+                "chat4": { "gramatica": ["cuarto chat", "chat cuatro"], "descripcion": "Cuarto chat del listado",  "xPct": 50, "yPct": 49 },
+                "chat5": { "gramatica": ["quinto chat", "chat cinco"],  "descripcion": "Quinto chat del listado",  "xPct": 50, "yPct": 57 },
+                "chat6": { "gramatica": ["sexto chat", "chat seis"],    "descripcion": "Sexto chat del listado",   "xPct": 50, "yPct": 64 },
+                "chat7": { "gramatica": ["séptimo chat", "chat siete"], "descripcion": "Séptimo chat del listado", "xPct": 50, "yPct": 71 },
+                "chat8": { "gramatica": ["octavo chat", "chat ocho"],   "descripcion": "Octavo chat del listado",  "xPct": 50, "yPct": 78 },
+                "chat9": { "gramatica": ["noveno chat", "chat nueve"],  "descripcion": "Noveno chat del listado",  "xPct": 50, "yPct": 85 },
+                "nuevoMensaje": {
+                  "gramatica": ["nuevo mensaje", "nuevo chat"],
+                  "descripcion": "Botón flotante para escribir un mensaje nuevo, abajo a la derecha",
+                  "xPct": 88, "yPct": 91
+                }
               }
+            },
+
+            "chat": {
+              "_nota": "ESTIMADO. Conversación abierta. Reglas de detección de ejemplo: calibrar con el log.",
+              "gramatica": ["conversación", "dentro del chat", "chat abierto"],
+              "descripcion": "Conversación abierta",
+              "detect": {
+                "any": [
+                  { "desc": "Adjuntar" },
+                  { "desc": "Enviar" }
+                ],
+                "none": [
+                  { "text": "Privacidad y seguridad" }
+                ],
+                "priority": 1
+              },
+              "ui": {
+                "atras": {
+                  "gramatica": ["atrás", "volver", "botón atrás"],
+                  "descripcion": "Flecha para volver a la lista de chats, arriba a la izquierda",
+                  "xPct": 6, "yPct": 6
+                },
+                "titulo": {
+                  "gramatica": ["título", "perfil del chat", "cabecera"],
+                  "descripcion": "Nombre del contacto o grupo. Al pulsarlo se abre su perfil",
+                  "xPct": 40, "yPct": 6
+                },
+                "menuChat": {
+                  "gramatica": ["menú del chat", "tres puntos", "más opciones"],
+                  "descripcion": "Menú de tres puntos del chat, arriba a la derecha",
+                  "xPct": 94, "yPct": 6
+                },
+                "adjuntar": {
+                  "gramatica": ["adjuntar", "clip", "adjuntos"],
+                  "descripcion": "Clip para adjuntar archivos o fotos, abajo a la izquierda",
+                  "xPct": 8, "yPct": 94
+                },
+                "campoMensaje": {
+                  "gramatica": ["campo de mensaje", "escribir mensaje", "caja de texto"],
+                  "descripcion": "Campo donde se escribe el mensaje, abajo",
+                  "xPct": 45, "yPct": 94
+                },
+                "enviar": {
+                  "gramatica": ["enviar", "botón enviar", "micrófono"],
+                  "descripcion": "Botón de enviar mensaje o grabar audio, abajo a la derecha",
+                  "xPct": 92, "yPct": 94
+                }
+              }
+            },
+
+            "ajustes": {
+              "_nota": "ESTIMADO. Pestaña de ajustes de Telegram.",
+              "gramatica": ["ajustes de telegram", "configuración de telegram", "pestaña ajustes"],
+              "descripcion": "Ajustes de Telegram",
+              "include": ["pestanas"],
+              "detect": {
+                "any": [
+                  { "text": "Privacidad y seguridad" },
+                  { "text": "Datos y almacenamiento" },
+                  { "text": "Idioma" }
+                ],
+                "priority": 2
+              },
+              "ui": {
+                "notificaciones": {
+                  "gramatica": ["notificaciones", "sonidos"],
+                  "descripcion": "Ajustes de notificaciones y sonidos",
+                  "xPct": 50, "yPct": 52
+                },
+                "privacidad": {
+                  "gramatica": ["privacidad", "privacidad y seguridad"],
+                  "descripcion": "Ajustes de privacidad y seguridad",
+                  "xPct": 50, "yPct": 60
+                },
+                "idioma": {
+                  "gramatica": ["idioma", "cambiar idioma"],
+                  "descripcion": "Cambiar el idioma de la aplicación",
+                  "xPct": 50, "yPct": 78
+                }
+              }
+            },
+
+            "contactos": {
+              "_nota": "ESTIMADO. Solo con la barra de pestañas hasta que se calibre.",
+              "gramatica": ["lista de contactos", "pestaña contactos"],
+              "descripcion": "Lista de contactos",
+              "include": ["pestanas"],
+              "detect": {
+                "any": [ { "text": "Invitar a amigos" }, { "text": "Ordenados por" } ],
+                "priority": 2
+              },
+              "ui": {}
             }
           }
         }

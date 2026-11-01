@@ -15,7 +15,10 @@ import android.view.inputmethod.InputMethodManager
 import io.github.stringmanolo.vocalia.config.AppConfigManager
 import io.github.stringmanolo.vocalia.config.AppUiConfig
 import io.github.stringmanolo.vocalia.config.Coord
+import io.github.stringmanolo.vocalia.config.DetectCond
+import io.github.stringmanolo.vocalia.config.ScreenDetect
 import io.github.stringmanolo.vocalia.config.UiElement
+import io.github.stringmanolo.vocalia.config.UiScreen
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import android.view.accessibility.AccessibilityEvent
@@ -63,6 +66,11 @@ class VocaliaAccessibilityService : AccessibilityService() {
     // --- Estado de la configuración por app ---
     @Volatile private var foregroundPackage: String? = null
     private var activeConfig: AppUiConfig? = null
+    /** Pantalla actual de la app (detectada por reglas, o forzada por voz con "pantalla X"). */
+    private var currentScreen: UiScreen? = null
+    private var forcedScreenKey: String? = null
+    /** Clase de la última ventana (actividad) que cambió de estado. */
+    @Volatile private var lastWindowClass: String? = null
     private var configPhrases: List<String> = emptyList()
     /** Cursor configurado seleccionado (virtual). Mientras exista, lee/pulsa/detalle/arrastra actúan sobre él. */
     private var virtualElement: UiElement? = null
@@ -92,7 +100,13 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event?.let {
-            if (it.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) noteWindowPackage(it.packageName)
+            if (it.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                noteWindowPackage(it.packageName)
+                val p = it.packageName?.toString()
+                if (p != null && p != packageName && p !in ignoredPackages) {
+                    lastWindowClass = it.className?.toString()
+                }
+            }
         }
     }
 
@@ -106,22 +120,120 @@ class VocaliaAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Carga (o recarga si cambió algún fichero) la configuración de la app en primer plano. */
+    /**
+     * Carga (o recarga si cambió algún fichero) la configuración de la app en primer plano,
+     * detecta la pantalla actual y recalcula las frases de gramática en caliente.
+     */
     private fun updateActiveConfig() {
         try {
             rootInActiveWindow?.let { noteWindowPackage(it.packageName) }
             AppConfigManager.reloadIfChanged()
             val cfg = foregroundPackage?.let { AppConfigManager.configFor(it) }
-            if (cfg?.appKey != activeConfig?.appKey || cfg?.elements?.size != activeConfig?.elements?.size) {
-                dbg("config activa: ${cfg?.appKey ?: "ninguna"} (${cfg?.elements?.size ?: 0} cursores, " +
-                    "versión instalada=${cfg?.installedVersion}, config=${cfg?.configVersion})")
-            }
+            if (cfg?.appKey != activeConfig?.appKey) forcedScreenKey = null
             activeConfig = cfg
-            configPhrases = cfg?.elements?.flatMap { it.grammar }?.distinct()?.take(MAX_CONFIG_PHRASES)
-                ?: emptyList()
+
+            val prevScreen = currentScreen?.key
+            currentScreen = cfg?.let { detectScreen(it) }
+            if (cfg?.appKey != lastLoggedApp || currentScreen?.key != prevScreen) {
+                lastLoggedApp = cfg?.appKey
+                dbg("config activa: ${cfg?.appKey ?: "ninguna"}, pantalla=${currentScreen?.key ?: "ninguna"}" +
+                    (if (forcedScreenKey != null) " (forzada)" else "") +
+                    " (${cfg?.elementsFor(currentScreen)?.size ?: 0} cursores, versión instalada=" +
+                    "${cfg?.installedVersion}, config=${cfg?.configVersion})")
+            }
+
+            val els = cfg?.elementsFor(currentScreen).orEmpty()
+            val screenNames = cfg?.screens?.flatMap { it.grammar }.orEmpty()
+            configPhrases = (els.flatMap { it.grammar } + screenNames).distinct().take(MAX_CONFIG_PHRASES)
         } catch (t: Throwable) {
             dbg("updateActiveConfig THREW ${t.javaClass.simpleName}: ${t.message}")
         }
+    }
+
+    private var lastLoggedApp: String? = null
+
+    // ---- Detección de pantalla ----
+
+    private class TreeSnap(
+        val ids: List<String>, val texts: List<String>, val descs: List<String>,
+        val classes: Set<String>, val selectedTexts: List<String>
+    )
+
+    private fun snapshotTree(root: AccessibilityNodeInfo): TreeSnap {
+        val ids = ArrayList<String>(); val texts = ArrayList<String>(); val descs = ArrayList<String>()
+        val classes = HashSet<String>(); val sel = ArrayList<String>()
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack.addLast(root)
+        var count = 0
+        while (stack.isNotEmpty() && count < 1500) {
+            val n = stack.removeLast()
+            count++
+            if (!n.isVisibleToUser) continue
+            n.viewIdResourceName?.let { ids.add(it) }
+            n.className?.toString()?.let { classes.add(it) }
+            val t = n.text.clean()?.let { SpeechText.normalize(it) }
+            val d = n.contentDescription.clean()?.let { SpeechText.normalize(it) }
+            if (t != null) texts.add(t)
+            if (d != null) descs.add(d)
+            if (n.isSelected) { t?.let { sel.add(it) }; d?.let { sel.add(it) } }
+            for (i in n.childCount - 1 downTo 0) n.getChild(i)?.let { stack.addLast(it) }
+        }
+        return TreeSnap(ids, texts, descs, classes, sel)
+    }
+
+    private fun matchCond(c: DetectCond, snap: TreeSnap): Boolean {
+        if (c.id == null && c.text == null && c.desc == null && c.cls == null && c.activity == null) return false
+        c.activity?.let { a ->
+            val w = lastWindowClass
+            if (w == null || !(w == a || w.endsWith(a))) return false
+        }
+        c.id?.let { id ->
+            if (snap.ids.none { it == id || it.endsWith(":id/$id") || it.endsWith("/$id") }) return false
+        }
+        c.text?.let { t ->
+            val n = SpeechText.normalize(t)
+            val pool = if (c.selected) snap.selectedTexts else snap.texts
+            if (pool.none { it.contains(n) }) return false
+        }
+        c.desc?.let { t ->
+            val n = SpeechText.normalize(t)
+            val pool = if (c.selected) snap.selectedTexts else snap.descs
+            if (pool.none { it.contains(n) }) return false
+        }
+        c.cls?.let { cl -> if (snap.classes.none { it.endsWith(cl) }) return false }
+        return true
+    }
+
+    /** Puntuación de una pantalla, o null si no cumple sus reglas. */
+    private fun scoreScreen(d: ScreenDetect, snap: TreeSnap): Int? {
+        if (d.all.any { !matchCond(it, snap) }) return null
+        val anyHits = d.any.count { matchCond(it, snap) }
+        if (d.any.isNotEmpty() && anyHits == 0) return null
+        if (d.none.any { matchCond(it, snap) }) return null
+        return d.priority * 100 + d.all.size + anyHits
+    }
+
+    private fun detectScreen(cfg: AppUiConfig): UiScreen? {
+        val default = cfg.defaultScreen()
+        forcedScreenKey?.let { k -> cfg.screens.firstOrNull { it.key == k }?.let { return it } }
+        val detectable = cfg.screens.filter { it.detect != null }
+        if (detectable.isEmpty()) return default
+        val root = rootInActiveWindow ?: return default
+        val snap = snapshotTree(root)
+        var best: UiScreen? = null
+        var bestScore = -1
+        for (sc in detectable) {
+            val score = scoreScreen(sc.detect!!, snap) ?: continue
+            if (score > bestScore) { best = sc; bestScore = score }
+        }
+        if ((best ?: default)?.key != currentScreen?.key) {
+            // Ayuda para escribir reglas de detección: qué hay en la pantalla ahora mismo
+            dbg("pantalla -> ${(best ?: default)?.key ?: "ninguna"}; actividad=$lastWindowClass")
+            dbg("  textos=${snap.texts.distinct().take(30)}")
+            dbg("  descripciones=${snap.descs.distinct().take(30)}")
+            dbg("  ids=${snap.ids.distinct().take(30)}")
+        }
+        return best ?: default
     }
 
     override fun onInterrupt() {
@@ -550,6 +662,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     fun clickCurrentNode(): String {
         virtualElement?.let { return pressElement(it) }
+        forcedScreenKey = null
         val node = getCurrentNode() ?: return "no hay elemento seleccionado"
         if (!node.refresh()) {
             refreshNodeList()
@@ -565,6 +678,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
     }
 
     fun performBack(): String {
+        forcedScreenKey = null
         val ok = performGlobalAction(GLOBAL_ACTION_BACK)
         dbg("back -> ok=$ok")
         return if (ok) "atrás" else "no se pudo volver atrás"
@@ -616,30 +730,29 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     private fun gestureHint(): String =
         if (!canGesture()) "falta canPerformGestures en la configuración del servicio de accesibilidad"
-        else "el gesto fue cancelado"
+        else "el sistema rechazó el gesto"
 
     /**
-     * Envía el gesto y espera su resultado (máx. 1,5 s). El callback llega en un hilo propio,
-     * por eso se puede bloquear el hilo principal sin interbloqueo.
+     * Envía el gesto SIN bloquear el hilo principal. Los resultados de dispatchGesture se
+     * entregan a través del hilo principal del servicio, así que esperarlos aquí lo bloquearía
+     * hasta el timeout y daría un falso "cancelado". Se devuelve si el sistema ACEPTÓ el gesto;
+     * el resultado final solo se registra en el log (un "cancelado" puede ser normal si la
+     * pantalla cambió justo al pulsar).
      */
-    private fun dispatchBlocking(gesture: GestureDescription): Boolean {
-        val latch = CountDownLatch(1)
-        var ok = false
+    private fun dispatchAsync(gesture: GestureDescription): Boolean {
         val sent = try {
             dispatchGesture(gesture, object : GestureResultCallback() {
-                override fun onCompleted(gestureDescription: GestureDescription?) { ok = true; latch.countDown() }
-                override fun onCancelled(gestureDescription: GestureDescription?) { ok = false; latch.countDown() }
+                override fun onCompleted(gestureDescription: GestureDescription?) { dbg("gesto completado") }
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    dbg("gesto cancelado (puede ser normal si la pantalla cambió)")
+                }
             }, gestureHandler)
         } catch (t: Throwable) {
             dbg("dispatchGesture THREW ${t.javaClass.simpleName}: ${t.message}")
             false
         }
-        if (!sent) {
-            dbg("dispatchGesture rechazado (canGesture=${canGesture()})")
-            return false
-        }
-        latch.await(1500, TimeUnit.MILLISECONDS)
-        return ok
+        if (!sent) dbg("dispatchGesture rechazado (canGesture=${canGesture()})")
+        return sent
     }
 
     private fun stroke(path: Path, startMs: Long, durMs: Long) =
@@ -649,20 +762,20 @@ class VocaliaAccessibilityService : AccessibilityService() {
     fun tapAt(x: Float, y: Float, durationMs: Long = 60): Boolean {
         dbg("tap ($x, $y) ${durationMs}ms")
         val p = Path().apply { moveTo(x, y) }
-        return dispatchBlocking(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
+        return dispatchAsync(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
     }
 
     fun longPressAt(x: Float, y: Float, durationMs: Long = 900): Boolean {
         dbg("longpress ($x, $y) ${durationMs}ms")
         val p = Path().apply { moveTo(x, y) }
-        return dispatchBlocking(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
+        return dispatchAsync(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
     }
 
     fun doubleTapAt(x: Float, y: Float): Boolean {
         dbg("doubletap ($x, $y)")
         val p1 = Path().apply { moveTo(x, y) }
         val p2 = Path().apply { moveTo(x, y) }
-        return dispatchBlocking(
+        return dispatchAsync(
             GestureDescription.Builder().addStroke(stroke(p1, 0, 40)).addStroke(stroke(p2, 140, 40)).build()
         )
     }
@@ -670,7 +783,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
     fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean {
         dbg("swipe ($x1,$y1) -> ($x2,$y2) ${durationMs}ms")
         val p = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
-        return dispatchBlocking(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
+        return dispatchAsync(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
     }
 
     /**
@@ -785,6 +898,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
      * robusto a cambios de diseño, y si no se encuentra, por coordenadas.
      */
     private fun pressElement(el: UiElement): String {
+        forcedScreenKey = null   // pulsar suele cambiar de pantalla: volver a detectarla
         dbg("pressElement ${el.key} action=${el.action} point=${el.hasPoint} selector=${el.hasSelector}")
         if (el.hasSelector) {
             val node = findBySelector(el)
@@ -821,14 +935,16 @@ class VocaliaAccessibilityService : AccessibilityService() {
         return if (ok) "pulsado" else "no se pudo pulsar, ${gestureHint()}"
     }
 
+    private fun screenLabel(): String = currentScreen?.displayName ?: "sin pantalla"
+
     /** "cursor primer chat": selecciona el cursor y lo describe. */
     fun cursorTo(phrase: String): String {
         updateActiveConfig()
         val cfg = activeConfig ?: return noConfigMessage()
-        val found = cfg.find(phrase)
-        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en ${cfg.appKey}"
+        val found = cfg.find(phrase, currentScreen)
+        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en la pantalla ${screenLabel()}"
         virtualElement = found[0]
-        dbg("cursor -> ${found[0].key} (${found.size} coincidencias)")
+        dbg("cursor -> ${found[0].key} (${found.size} coincidencias, pantalla=${currentScreen?.key})")
         return describeVirtual(found[0]) + if (found.size > 1) ". hay ${found.size} coincidencias" else ""
     }
 
@@ -836,38 +952,77 @@ class VocaliaAccessibilityService : AccessibilityService() {
     fun pressByPhrase(phrase: String): String {
         updateActiveConfig()
         val cfg = activeConfig ?: return noConfigMessage()
-        val found = cfg.find(phrase)
-        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en ${cfg.appKey}"
+        val found = cfg.find(phrase, currentScreen)
+        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en la pantalla ${screenLabel()}"
         virtualElement = found[0]
         return pressElement(found[0])
     }
 
-    /** "lee cursores": lista los cursores de la app en primer plano. */
+    /** "lee cursores": lista los cursores de la pantalla actual de la app en primer plano. */
     fun listCursors(): String {
         updateActiveConfig()
         val cfg = activeConfig ?: return noConfigMessage()
-        if (cfg.elements.isEmpty()) return "la configuración de ${cfg.appKey} no tiene cursores"
-        val sb = StringBuilder("En ${cfg.appKey} hay ${cfg.elements.size} cursores. ")
-        cfg.elements.take(40).forEach { el ->
+        val els = cfg.elementsFor(currentScreen)
+        if (els.isEmpty()) return "la pantalla ${screenLabel()} de ${cfg.appKey} no tiene cursores"
+        val sb = StringBuilder("En ${cfg.appKey}, pantalla ${screenLabel()}, hay ${els.size} cursores. ")
+        els.take(40).forEach { el ->
             sb.append(el.displayName)
             if (!el.description.equals(el.displayName, ignoreCase = true)) sb.append(": ").append(el.description)
             sb.append(". ")
         }
-        if (cfg.elements.size > 40) sb.append("y ${cfg.elements.size - 40} más.")
+        if (els.size > 40) sb.append("y ${els.size - 40} más.")
         return sb.toString().trim()
+    }
+
+    /** "pantalla ajustes": fuerza la pantalla actual (hasta pulsar algo, volver atrás o cambiar de app). */
+    fun screenTo(name: String): String {
+        updateActiveConfig()
+        val cfg = activeConfig ?: return noConfigMessage()
+        if (cfg.screens.isEmpty()) return "${cfg.appKey} no tiene pantallas definidas"
+        val sc = cfg.findScreen(name)
+            ?: return "no conozco la pantalla $name. Las pantallas son: " + cfg.screens.joinToString(", ") { it.displayName }
+        forcedScreenKey = sc.key
+        virtualElement = null
+        updateActiveConfig()
+        return "pantalla ${sc.displayName}, ${cfg.elementsFor(sc).size} cursores"
+    }
+
+    /** "pantalla automática": vuelve a detectar la pantalla sola. */
+    fun screenAuto(): String {
+        forcedScreenKey = null
+        virtualElement = null
+        updateActiveConfig()
+        return "detección automática de pantalla, " + (currentScreen?.let { "ahora: ${it.displayName}" } ?: "no reconozco la pantalla")
+    }
+
+    /** "qué pantalla es": pantalla actual y cómo se decidió. */
+    fun screenInfo(): String {
+        updateActiveConfig()
+        val cfg = activeConfig ?: return noConfigMessage()
+        val cur = currentScreen
+        val how = if (forcedScreenKey != null) "forzada" else "detectada"
+        val sb = StringBuilder()
+        if (cur == null) sb.append("No reconozco la pantalla de ${cfg.appKey}.")
+        else sb.append("Pantalla $how: ${cur.displayName}. ${cur.description}.")
+        if (cfg.screens.isNotEmpty()) {
+            sb.append(" Pantallas disponibles: ").append(cfg.screens.joinToString(", ") { it.displayName }).append(".")
+        }
+        return sb.toString()
     }
 
     /** "recarga configuración": relee los ficheros ahora. */
     fun reloadConfig(): String {
         val msg = AppConfigManager.reload()
         updateActiveConfig()
-        return msg + ". " + (activeConfig?.let { "${it.appKey}: ${it.elements.size} cursores" }
-            ?: "esta aplicación no tiene configuración")
+        return msg + ". " + (activeConfig?.let {
+            "${it.appKey}, pantalla ${screenLabel()}: ${it.elementsFor(currentScreen).size} cursores"
+        } ?: "esta aplicación no tiene configuración")
     }
 
     /** "estado de la configuración": diagnóstico hablado. */
     fun configStatus(): String {
         updateActiveConfig()
-        return AppConfigManager.statusFor(activeConfig, foregroundPackage)
+        return AppConfigManager.statusFor(activeConfig, foregroundPackage) +
+            (if (activeConfig != null) " Pantalla actual: ${screenLabel()}." else "")
     }
 }

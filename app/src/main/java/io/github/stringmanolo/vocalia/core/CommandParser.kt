@@ -33,6 +33,10 @@ sealed class CommandResult {
     /** "pulsa primer chat": ejecuta directamente un cursor configurado. */
     data class UiPressPhrase(val phrase: String) : CommandResult()
     object UiListCursors : CommandResult()
+    /** "pantalla ajustes": fuerza la pantalla actual de la app. */
+    data class UiScreen(val name: String) : CommandResult()
+    object UiScreenAuto : CommandResult()
+    object UiScreenInfo : CommandResult()
     object UiReloadConfig : CommandResult()
     object UiConfigInfo : CommandResult()
     data class UiSearch(val query: String) : CommandResult()
@@ -156,6 +160,22 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
             }
         }
         parseNumberedElement(text)?.let { return it }
+
+        // --- Pantallas de la app (ficheros de configuración) ---
+        if (matches(text,
+                "pantalla automática", "pantalla automatica", "detecta la pantalla",
+                "detectar pantalla", "detección automática", "deteccion automatica")) {
+            return CommandResult.UiScreenAuto
+        }
+        if (matches(text,
+                "qué pantalla es", "que pantalla es", "en qué pantalla estoy", "en que pantalla estoy",
+                "qué pantalla hay", "que pantalla hay", "pantalla actual")) {
+            return CommandResult.UiScreenInfo
+        }
+        if (text.startsWith("pantalla ")) {
+            val q = text.removePrefix("pantalla ").trim()
+            if (q.isNotEmpty()) return CommandResult.UiScreen(q)
+        }
 
         // --- Cursores configurados por app (ficheros de configuración) ---
         if (matches(text,

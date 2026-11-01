@@ -44,6 +44,30 @@ data class UiElement(
     val hasSelector: Boolean get() = selId != null || selText != null || selDesc != null
 }
 
+/** Condición para reconocer una pantalla por lo que hay en el árbol de accesibilidad. */
+data class DetectCond(
+    val id: String?, val text: String?, val desc: String?, val cls: String?,
+    val activity: String?, val selected: Boolean
+)
+
+/** Reglas de detección: todas las de `all`, al menos una de `any` (si hay) y ninguna de `none`. */
+data class ScreenDetect(
+    val all: List<DetectCond>, val any: List<DetectCond>, val none: List<DetectCond>, val priority: Int
+)
+
+/** Una pantalla (categoría de pantalla) de una app: tiene sus propios cursores. */
+data class UiScreen(
+    val key: String,
+    val displayName: String,
+    val grammar: List<String>,
+    val matchKeys: List<String>,
+    val description: String,
+    /** Pantalla que se usa si no se reconoce ninguna otra. */
+    val isDefault: Boolean,
+    val detect: ScreenDetect?,
+    val elements: List<UiElement>
+)
+
 /** Configuración ya resuelta (dispositivo + versión instalada) de una app. */
 data class AppUiConfig(
     val appKey: String,
@@ -52,16 +76,38 @@ data class AppUiConfig(
     /** Versión de la configuración elegida, o null si se usó solo el bloque base. */
     val configVersion: String?,
     val description: String,
-    val elements: List<UiElement>
+    /** Cursores válidos en cualquier pantalla de la app. */
+    val globalElements: List<UiElement>,
+    val screens: List<UiScreen>
 ) {
-    /** Busca cursores por frase hablada: primero coincidencia exacta, luego por palabras contenidas. */
-    fun find(query: String): List<UiElement> {
+    fun defaultScreen(): UiScreen? = screens.firstOrNull { it.isDefault }
+
+    /** Cursores disponibles en [screen]: los globales + los de la pantalla (los de la pantalla ganan). */
+    fun elementsFor(screen: UiScreen?): List<UiElement> {
+        if (screen == null) return globalElements
+        val m = LinkedHashMap<String, UiElement>()
+        globalElements.forEach { m[it.key] = it }
+        screen.elements.forEach { m[it.key] = it }
+        return m.values.toList()
+    }
+
+    /** Busca cursores por frase hablada en [screen]: primero coincidencia exacta, luego por palabras. */
+    fun find(query: String, screen: UiScreen?): List<UiElement> {
         val q = SpeechText.normalize(query)
         if (q.isEmpty()) return emptyList()
-        val exact = elements.filter { e -> e.matchKeys.any { it == q } }
+        val els = elementsFor(screen)
+        val exact = els.filter { e -> e.matchKeys.any { it == q } }
         if (exact.isNotEmpty()) return exact
         val words = q.split(' ').filter { it.isNotEmpty() }
-        return elements.filter { e -> e.matchKeys.any { p -> words.all { p.contains(it) } } }
+        return els.filter { e -> e.matchKeys.any { p -> words.all { p.contains(it) } } }
+    }
+
+    fun findScreen(query: String): UiScreen? {
+        val q = SpeechText.normalize(query)
+        if (q.isEmpty()) return null
+        screens.firstOrNull { s -> s.matchKeys.any { it == q } }?.let { return it }
+        val words = q.split(' ').filter { it.isNotEmpty() }
+        return screens.firstOrNull { s -> s.matchKeys.any { p -> words.all { p.contains(it) } } }
     }
 }
 
@@ -335,6 +381,8 @@ object AppConfigManager {
         val installed = installedVersion(pkg)
 
         var ui = app.ciObj("ui", "interfaz") ?: JSONObject()
+        var screensObj = app.ciObj("screens", "pantallas") ?: JSONObject()
+        var groupsObj = app.ciObj("groups", "grupos") ?: JSONObject()
         var chosen: String? = null
 
         val versions = app.ciObj("versions", "versiones")
@@ -345,26 +393,105 @@ object AppConfigManager {
             chosen = when {
                 installed == null -> keys.last()
                 else -> keys.lastOrNull { compareVersions(it, installed) <= 0 }
-                    ?: if (ui.length() == 0) keys.first() else null
+                    ?: if (ui.length() == 0 && screensObj.length() == 0) keys.first() else null
             }
             chosen?.let { v ->
-                versions.optJSONObject(v)?.ciObj("ui", "interfaz")?.let { vui -> ui = deepMerge(ui, vui) }
+                val vo = versions.optJSONObject(v)
+                vo?.ciObj("ui", "interfaz")?.let { x -> ui = deepMerge(ui, x) }
+                vo?.ciObj("screens", "pantallas")?.let { x -> screensObj = deepMerge(screensObj, x) }
+                vo?.ciObj("groups", "grupos")?.let { x -> groupsObj = deepMerge(groupsObj, x) }
             }
         }
         if (chosen == null) chosen = app.ciStr("version")
 
-        val elements = mutableListOf<UiElement>()
+        val groups = LinkedHashMap<String, List<UiElement>>()
+        val gIter = groupsObj.keys()
+        while (gIter.hasNext()) {
+            val g = gIter.next()
+            groups[g.lowercase()] = parseElements(groupsObj.optJSONObject(g))
+        }
+
+        val screens = mutableListOf<UiScreen>()
+        val sIter = screensObj.keys()
+        while (sIter.hasNext()) {
+            val key = sIter.next()
+            val o = screensObj.optJSONObject(key) ?: continue
+            if (o.ci("enabled", "activo") == false) continue
+            parseScreen(key, o, groups)?.let { sc -> screens.add(sc) }
+        }
+
+        return AppUiConfig(
+            appKey = appKey, packageName = pkg, installedVersion = installed,
+            configVersion = chosen,
+            description = app.ciStr("description", "descripcion", "descripción") ?: "",
+            globalElements = parseElements(ui), screens = screens
+        )
+    }
+
+    private fun parseElements(ui: JSONObject?): List<UiElement> {
+        val out = mutableListOf<UiElement>()
+        if (ui == null) return out
         val uIter = ui.keys()
         while (uIter.hasNext()) {
             val key = uIter.next()
             val o = ui.optJSONObject(key) ?: continue
             if (o.ci("enabled", "activo") == false) continue
-            parseElement(key, o)?.let { e -> elements.add(e) }
+            parseElement(key, o)?.let { e -> out.add(e) }
         }
-        return AppUiConfig(
-            appKey = appKey, packageName = pkg, installedVersion = installed,
-            configVersion = chosen, description = app.ciStr("description", "descripcion", "descripción") ?: "",
-            elements = elements
+        return out
+    }
+
+    private fun parseCond(o: JSONObject) = DetectCond(
+        id = o.ciStr("id", "viewId"),
+        text = o.ciStr("text", "texto"),
+        desc = o.ciStr("desc", "descripcion", "contentDescription"),
+        cls = o.ciStr("class", "clase"),
+        activity = o.ciStr("activity", "actividad"),
+        selected = o.ci("selected", "seleccionado") == true
+    )
+
+    private fun condList(v: Any?): List<DetectCond> = when (v) {
+        is JSONArray -> (0 until v.length()).mapNotNull { i -> v.optJSONObject(i)?.let { parseCond(it) } }
+        is JSONObject -> listOf(parseCond(v))
+        else -> emptyList()
+    }
+
+    private fun parseDetect(d: JSONObject?): ScreenDetect? {
+        if (d == null) return null
+        var all = condList(d.ci("all", "todos"))
+        val any = condList(d.ci("any", "alguno"))
+        val none = condList(d.ci("none", "ninguno"))
+        // Atajo: { "text": "..." } directamente en detect
+        if (all.isEmpty() && any.isEmpty() && none.isEmpty()) {
+            val c = parseCond(d)
+            if (c.id != null || c.text != null || c.desc != null || c.cls != null || c.activity != null) all = listOf(c)
+        }
+        if (all.isEmpty() && any.isEmpty() && none.isEmpty()) return null
+        return ScreenDetect(all, any, none, (d.ci("priority", "prioridad") as? Number)?.toInt() ?: 0)
+    }
+
+    private fun parseScreen(key: String, o: JSONObject, groups: Map<String, List<UiElement>>): UiScreen? {
+        val phrases = LinkedHashSet<String>()
+        stringList(o.ci("gramatica", "gramática", "grammar", "names", "nombres")).forEach {
+            grammarPhrase(it).takeIf { p -> p.isNotEmpty() }?.let { p -> phrases.add(p) }
+        }
+        grammarPhrase(keyToWords(key)).takeIf { it.isNotEmpty() }?.let { phrases.add(it) }
+        if (phrases.isEmpty()) return null
+
+        // Cursores: primero los de los grupos incluidos, luego los propios (ganan por clave)
+        val m = LinkedHashMap<String, UiElement>()
+        stringList(o.ci("include", "incluir")).forEach { g ->
+            groups[g.lowercase()]?.forEach { e -> m[e.key] = e }
+        }
+        parseElements(o.ciObj("ui", "interfaz")).forEach { e -> m[e.key] = e }
+
+        return UiScreen(
+            key = key, displayName = phrases.first(), grammar = phrases.toList(),
+            matchKeys = phrases.map { SpeechText.normalize(it) }.distinct(),
+            description = o.ciStr("descripcion", "descripción", "description") ?: phrases.first(),
+            isDefault = o.ci("default", "porDefecto", "por_defecto") == true,
+            detect = parseDetect(o.ciObj("detect", "detectar")),
+            elements = m.values.toList()
         )
     }
 
@@ -439,7 +566,7 @@ object AppConfigManager {
         if (pkg == null) sb.append("No sé qué aplicación hay en primer plano.")
         else if (cfg == null) sb.append("La aplicación en primer plano no tiene configuración. Paquete $pkg.")
         else {
-            sb.append("Aplicación ${cfg.appKey}, ${cfg.elements.size} cursores. ")
+            sb.append("Aplicación ${cfg.appKey}, ${cfg.screens.size} pantallas y ${cfg.globalElements.size} cursores comunes. ")
             sb.append("Versión instalada ${cfg.installedVersion ?: "desconocida"}, ")
             sb.append("configuración para ${cfg.configVersion ?: "todas las versiones"}.")
         }

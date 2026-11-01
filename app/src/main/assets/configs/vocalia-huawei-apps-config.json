@@ -1,6 +1,6 @@
 {
-  "schema": 1,
-  "_nota": "Ajustes específicos de Huawei. Se aplican SOBRE vocalia-default-apps-config.json. Solo hay que poner lo que cambia. Las claves de dispositivo se comparan sin mayúsculas ni símbolos con: fabricante, marca, modelo (Build.MODEL, p. ej. JNY-LX1), Build.DEVICE y el nombre del dispositivo de Ajustes. Mira el log '[config] claves de dispositivo reconocidas' para saber cuáles tiene tu móvil. 'match' añade alias.",
+  "schema": 2,
+  "_nota": "Ajustes específicos de Huawei. Se aplican SOBRE vocalia-default-apps-config.json: solo hay que poner lo que cambia. Las claves de dispositivo se comparan sin mayúsculas ni símbolos con: fabricante, marca, modelo (Build.MODEL, p. ej. JNY-LX1), Build.DEVICE y el nombre del dispositivo de Ajustes. Mira en el log '[config] claves de dispositivo reconocidas'. 'match' añade alias.",
   "devices": {
     "huawei": {
       "_nota": "Sección de fabricante: se aplica a cualquier Huawei (prioridad 1).",
@@ -8,12 +8,16 @@
     },
     "HuaweiP40Lite": {
       "match": ["JNY-LX1", "JNY-L21", "JNY-L22", "JNY-L01", "JNY-L02"],
-      "_nota": "Sección de modelo (prioridad 2): gana a la del fabricante y a default.",
+      "_nota": "Sección de modelo (prioridad 2): gana a la del fabricante y a default. Ejemplo de parche: ajustar un cursor y quitar otro.",
       "apps": {
         "telegram": {
-          "ui": {
-            "chat1": { "xPct": 50, "yPct": 13.5 },
-            "chat3": null
+          "screens": {
+            "listaChats": {
+              "ui": {
+                "chat1": { "yPct": 28 },
+                "chat9": null
+              }
+            }
           }
         }
       }
