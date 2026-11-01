@@ -46,6 +46,10 @@ class VocaliaCore(
             "busca", "buscar", "busca elemento", "busca elemento con texto",
             "busca elemento con", "busca el elemento", "busca el texto", "busca texto",
             "elemento", "con", "texto", "el", "y",
+            "cursor", "cursores", "lee cursores", "lista de cursores", "qué cursores hay",
+            "recarga configuración", "recarga la configuración", "recarga configuracion",
+            "estado de la configuración", "información de la configuración",
+            "pulsa en", "toca en", "toca", "en", "de", "la", "lista",
             "un", "uno", "una", "dos", "tres", "cuatro", "cinco", "seis", "siete",
             "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince",
             "dieciséis", "diecisiete", "dieciocho", "diecinueve", "veinte",
@@ -109,6 +113,12 @@ class VocaliaCore(
             "Los números se mantienen hasta que digas otra vez lee todo. " +
             "Para buscar por nombre: busca elemento con texto, y la palabra, por ejemplo ajustes. " +
             "Te diré el número y podrás pulsarlo. " +
+            "Si la aplicación tiene cursores configurados: cursor, y su nombre, por ejemplo cursor primer chat, " +
+            "te coloca en él, y después pulsa, lee, detalle o arrastra. " +
+            "También puedes pulsar directamente: pulsa, y el nombre del cursor. " +
+            "Para oír qué cursores tiene la aplicación: lee cursores. " +
+            "Si has editado los ficheros de configuración: recarga configuración. " +
+            "Para diagnosticar: estado de la configuración. " +
             "Para pegar: portapapeles pegar. " +
             "Para salir: vocalia, sal del modo usar. " +
             "Para detenerme mientras hablo: vocalia, para."
@@ -668,6 +678,15 @@ class VocaliaCore(
             CommandResult.UiPrevious -> a11yCommand { it.previousNode() }
             CommandResult.UiRead     -> a11yCommand { it.readCurrentNode() }
             CommandResult.UiDetail   -> a11yCommand { it.describeCurrentNodeDetailed() }
+            is CommandResult.UiCursor -> a11yCommand { it.cursorTo(parsed.phrase) }
+            is CommandResult.UiPressPhrase -> a11yCommand(refreshAfter = true) { it.pressByPhrase(parsed.phrase) }
+            CommandResult.UiListCursors -> a11yCommand { it.listCursors() }
+            CommandResult.UiReloadConfig -> a11yCommand {
+                val msg = it.reloadConfig()
+                dynamicUiWords = it.getVocabulary()
+                msg
+            }
+            CommandResult.UiConfigInfo -> a11yCommand { it.configStatus() }
             CommandResult.UiReadAll  -> a11yCommand {
                 val msg = it.readAllElements()
                 dynamicUiWords = it.getVocabulary()

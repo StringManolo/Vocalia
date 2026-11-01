@@ -1,8 +1,23 @@
 package io.github.stringmanolo.vocalia
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
+import android.content.Context
+import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.DisplayMetrics
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import io.github.stringmanolo.vocalia.config.AppConfigManager
+import io.github.stringmanolo.vocalia.config.AppUiConfig
+import io.github.stringmanolo.vocalia.config.Coord
+import io.github.stringmanolo.vocalia.config.UiElement
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import io.github.stringmanolo.vocalia.util.InternalDebug
@@ -10,9 +25,13 @@ import io.github.stringmanolo.vocalia.util.InternalDebug
 /**
  * Servicio de accesibilidad de Vocalia.
  *
- * Expone una lista ordenada de nodos "interactivos" (BFS) y métodos para
- * navegar por ella, leer su descripción, pulsarla, hacer scroll, ir atrás
- * y pegar del portapapeles.
+ * Expone una lista ordenada de nodos "interactivos" (orden de lectura) y
+ * métodos para navegar por ella, leer su descripción, pulsarla, hacer scroll,
+ * ir atrás y pegar del portapapeles.
+ *
+ * Además funciona como un "ratón": puede pulsar, mantener, doble pulsación y
+ * deslizar en cualquier coordenada (dispatchGesture) y trae "cursores" definidos
+ * por app en ficheros de configuración (ver AppConfigManager).
  *
  * Toda la operativa se asume llamada desde el hilo principal (VocaliaCore
  * lo hace a través de mainHandler.post).
@@ -22,6 +41,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
     companion object {
         private const val MAX_NODES = 120
         private const val MAX_VOCAB = 150
+        private const val MAX_CONFIG_PHRASES = 150
 
         @Volatile
         var instance: VocaliaAccessibilityService? = null
@@ -40,6 +60,17 @@ class VocaliaAccessibilityService : AccessibilityService() {
         InternalDebug.mark("[A11y] $msg")
     }
 
+    // --- Estado de la configuración por app ---
+    @Volatile private var foregroundPackage: String? = null
+    private var activeConfig: AppUiConfig? = null
+    private var configPhrases: List<String> = emptyList()
+    /** Cursor configurado seleccionado (virtual). Mientras exista, lee/pulsa/detalle/arrastra actúan sobre él. */
+    private var virtualElement: UiElement? = null
+    private var ignoredPackages: Set<String> = setOf("com.android.systemui")
+
+    private val gestureThread = HandlerThread("vocalia-gesture").apply { start() }
+    private val gestureHandler = Handler(gestureThread.looper)
+
     // ----------------------------------------------------------------
     // Ciclo de vida
     // ----------------------------------------------------------------
@@ -48,10 +79,49 @@ class VocaliaAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         dbg("onServiceConnected")
+        try {
+            val imes = (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                .enabledInputMethodList.map { it.packageName }
+            ignoredPackages = (imes + "com.android.systemui").toSet()
+            AppConfigManager.init(applicationContext)
+            dbg("configuración en ${AppConfigManager.configDirPath()}")
+        } catch (t: Throwable) {
+            dbg("init config THREW ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Stub. En fases posteriores refrescaremos en TYPE_WINDOW_STATE_CHANGED.
+        event?.let {
+            if (it.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) noteWindowPackage(it.packageName)
+        }
+    }
+
+    /** Recuerda la última app "real" en primer plano (ignora Vocalia, teclados y la barra del sistema). */
+    private fun noteWindowPackage(pkg: CharSequence?) {
+        val p = pkg?.toString() ?: return
+        if (p == packageName || p in ignoredPackages) return
+        if (p != foregroundPackage) {
+            foregroundPackage = p
+            dbg("app en primer plano: $p")
+        }
+    }
+
+    /** Carga (o recarga si cambió algún fichero) la configuración de la app en primer plano. */
+    private fun updateActiveConfig() {
+        try {
+            rootInActiveWindow?.let { noteWindowPackage(it.packageName) }
+            AppConfigManager.reloadIfChanged()
+            val cfg = foregroundPackage?.let { AppConfigManager.configFor(it) }
+            if (cfg?.appKey != activeConfig?.appKey || cfg?.elements?.size != activeConfig?.elements?.size) {
+                dbg("config activa: ${cfg?.appKey ?: "ninguna"} (${cfg?.elements?.size ?: 0} cursores, " +
+                    "versión instalada=${cfg?.installedVersion}, config=${cfg?.configVersion})")
+            }
+            activeConfig = cfg
+            configPhrases = cfg?.elements?.flatMap { it.grammar }?.distinct()?.take(MAX_CONFIG_PHRASES)
+                ?: emptyList()
+        } catch (t: Throwable) {
+            dbg("updateActiveConfig THREW ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     override fun onInterrupt() {
@@ -60,6 +130,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        gestureThread.quitSafely()
         dbg("onDestroy")
         super.onDestroy()
     }
@@ -78,13 +149,17 @@ class VocaliaAccessibilityService : AccessibilityService() {
      */
     fun refreshNodeList(preserveIndex: Boolean = false) {
         val previousIndex = currentIndex
+        if (!preserveIndex) virtualElement = null
         val root = rootInActiveWindow
         if (root == null) {
             interactiveNodes = emptyList()
             currentIndex = -1
             dbg("refreshNodeList: rootInActiveWindow=null")
+            updateActiveConfig()
             return
         }
+        noteWindowPackage(root.packageName)
+        updateActiveConfig()
         val result = mutableListOf<AccessibilityNodeInfo>()
         // Recorrido en profundidad (preorden): sigue el orden de lectura visual,
         // a diferencia de BFS, que mezclaba niveles del árbol.
@@ -130,7 +205,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
      * caliente a la gramática de Vosk para poder buscar por nombre.
      */
     @Volatile private var vocabulary: List<String> = emptyList()
-    fun getVocabulary(): List<String> = vocabulary
+    fun getVocabulary(): List<String> = configPhrases + vocabulary
 
     private val WORD_REGEX = Regex("^[a-záéíóúüñ]{2,20}$")
 
@@ -156,7 +231,13 @@ class VocaliaAccessibilityService : AccessibilityService() {
         refreshNodeList()
         numbered = interactiveNodes.toList()
         rebuildVocabulary()
-        dbg("buildNumbering: ${numbered.size} elementos numerados")
+        dbg("buildNumbering: ${numbered.size} elementos numerados (app=$foregroundPackage)")
+        numbered.forEachIndexed { i, n ->
+            val r = Rect(); n.getBoundsInScreen(r)
+            dbg("  #${i + 1} ${n.className} [${r.left},${r.top}][${r.right},${r.bottom}] " +
+                "centro=(${r.centerX()},${r.centerY()}) id=${n.viewIdResourceName} " +
+                "text=${n.text?.toString()?.take(40)} desc=${n.contentDescription?.toString()?.take(40)}")
+        }
     }
 
     /** Descripción para listas: "<tipo> <n>: <nombre>, <estado>". */
@@ -198,6 +279,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
      * mensaje de error, o null si quedó seleccionado.
      */
     fun selectNumbered(n: Int): String? {
+        virtualElement = null
         if (numbered.isEmpty()) return "no hay números asignados, di lee todo"
         if (n !in 1..numbered.size) return "no existe el elemento $n, hay ${numbered.size}"
         val node = numbered[n - 1]
@@ -375,6 +457,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     /** Descripción ampliada del nodo actual: nombre, tipo, acciones, estado y posición en pantalla. */
     fun describeCurrentNodeDetailed(): String {
+        virtualElement?.let { return describeVirtualDetailed(it) }
         if (interactiveNodes.isEmpty()) return "no hay elementos"
         val node = getCurrentNode() ?: return "no hay elemento seleccionado"
         node.refresh()
@@ -395,6 +478,12 @@ class VocaliaAccessibilityService : AccessibilityService() {
         val horiz = when { r.centerX() < dm.widthPixels / 3 -> "izquierda"; r.centerX() > dm.widthPixels * 2 / 3 -> "derecha"; else -> "centro" }
         val vert  = when { r.centerY() < dm.heightPixels / 3 -> "arriba"; r.centerY() > dm.heightPixels * 2 / 3 -> "abajo"; else -> "en medio" }
         sb.append(". posición: $vert $horiz")
+        run {
+            val dmx = resources.displayMetrics
+            val px = r.centerX() * 100 / dmx.widthPixels.coerceAtLeast(1)
+            val py = r.centerY() * 100 / dmx.heightPixels.coerceAtLeast(1)
+            sb.append(". coordenadas ${r.centerX()} ${r.centerY()}, $px por ciento y $py por ciento")
+        }
         sb.append(". elemento ${currentIndex + 1} de ${interactiveNodes.size}")
         val num = numberOf(node)
         if (num > 0) sb.append(". número $num")
@@ -409,6 +498,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     /** Descripción breve del elemento seleccionado (no mueve la selección). */
     fun readCurrentNode(): String {
+        virtualElement?.let { return describeVirtual(it) }
         if (interactiveNodes.isEmpty()) {
             return "no hay elementos. Prueba a decir siguiente o anterior."
         }
@@ -438,6 +528,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     /** Mueve la selección al elemento siguiente (circular) y lo anuncia. */
     fun nextNode(): String {
+        virtualElement = null
         ensureListIsFresh()
         if (interactiveNodes.isEmpty()) return "no hay elementos"
         currentIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % interactiveNodes.size
@@ -446,6 +537,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     /** Mueve la selección al elemento anterior (circular) y lo anuncia. */
     fun previousNode(): String {
+        virtualElement = null
         ensureListIsFresh()
         if (interactiveNodes.isEmpty()) return "no hay elementos"
         currentIndex = if (currentIndex <= 0) interactiveNodes.size - 1 else currentIndex - 1
@@ -457,15 +549,19 @@ class VocaliaAccessibilityService : AccessibilityService() {
     // ----------------------------------------------------------------
 
     fun clickCurrentNode(): String {
+        virtualElement?.let { return pressElement(it) }
         val node = getCurrentNode() ?: return "no hay elemento seleccionado"
         if (!node.refresh()) {
             refreshNodeList()
             return "el elemento ya no está disponible, lista actualizada"
         }
-        if (!node.isClickable) return "este elemento no se puede pulsar"
-        val ok = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        dbg("click [$currentIndex] -> ok=$ok")
-        return if (ok) "pulsado" else "no se pudo pulsar"
+        val how = clickNode(node)
+        dbg("click [$currentIndex] -> $how")
+        return when (how) {
+            "click" -> "pulsado"
+            "gesture" -> "pulsado por coordenadas"
+            else -> "no se pudo pulsar"
+        }
     }
 
     fun performBack(): String {
@@ -475,6 +571,12 @@ class VocaliaAccessibilityService : AccessibilityService() {
     }
 
     fun scroll(direction: ScrollDirection): String {
+        virtualElement?.let { el ->
+            if (!el.hasPoint) return "este cursor no tiene posición"
+            val (w, h) = screenSize()
+            return if (swipeFrom(el.x!!.toPx(w), el.y!!.toPx(h), direction, w, h)) "desplazado"
+            else "no se pudo desplazar, ${gestureHint()}"
+        }
         val node = getCurrentNode() ?: rootInActiveWindow
         if (node == null) return "no hay ventana activa"
         val action = when (direction) {
@@ -495,5 +597,277 @@ class VocaliaAccessibilityService : AccessibilityService() {
         val ok = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
         dbg("paste -> ok=$ok (foco=${focused.className})")
         return if (ok) "pegado" else "no se pudo pegar"
+    }
+
+    // ----------------------------------------------------------------
+    // Gestos: clicks "de ratón" por coordenadas
+    // ----------------------------------------------------------------
+
+    @Suppress("DEPRECATION")
+    private fun screenSize(): Pair<Int, Int> {
+        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val m = DisplayMetrics()
+        wm.defaultDisplay.getRealMetrics(m)
+        return m.widthPixels to m.heightPixels
+    }
+
+    private fun canGesture(): Boolean =
+        ((serviceInfo?.capabilities ?: 0) and AccessibilityServiceInfo.CAPABILITY_CAN_PERFORM_GESTURES) != 0
+
+    private fun gestureHint(): String =
+        if (!canGesture()) "falta canPerformGestures en la configuración del servicio de accesibilidad"
+        else "el gesto fue cancelado"
+
+    /**
+     * Envía el gesto y espera su resultado (máx. 1,5 s). El callback llega en un hilo propio,
+     * por eso se puede bloquear el hilo principal sin interbloqueo.
+     */
+    private fun dispatchBlocking(gesture: GestureDescription): Boolean {
+        val latch = CountDownLatch(1)
+        var ok = false
+        val sent = try {
+            dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) { ok = true; latch.countDown() }
+                override fun onCancelled(gestureDescription: GestureDescription?) { ok = false; latch.countDown() }
+            }, gestureHandler)
+        } catch (t: Throwable) {
+            dbg("dispatchGesture THREW ${t.javaClass.simpleName}: ${t.message}")
+            false
+        }
+        if (!sent) {
+            dbg("dispatchGesture rechazado (canGesture=${canGesture()})")
+            return false
+        }
+        latch.await(1500, TimeUnit.MILLISECONDS)
+        return ok
+    }
+
+    private fun stroke(path: Path, startMs: Long, durMs: Long) =
+        GestureDescription.StrokeDescription(path, startMs, durMs.coerceAtLeast(1))
+
+    /** Pulsación simple en (x, y) en píxeles de pantalla. */
+    fun tapAt(x: Float, y: Float, durationMs: Long = 60): Boolean {
+        dbg("tap ($x, $y) ${durationMs}ms")
+        val p = Path().apply { moveTo(x, y) }
+        return dispatchBlocking(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
+    }
+
+    fun longPressAt(x: Float, y: Float, durationMs: Long = 900): Boolean {
+        dbg("longpress ($x, $y) ${durationMs}ms")
+        val p = Path().apply { moveTo(x, y) }
+        return dispatchBlocking(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
+    }
+
+    fun doubleTapAt(x: Float, y: Float): Boolean {
+        dbg("doubletap ($x, $y)")
+        val p1 = Path().apply { moveTo(x, y) }
+        val p2 = Path().apply { moveTo(x, y) }
+        return dispatchBlocking(
+            GestureDescription.Builder().addStroke(stroke(p1, 0, 40)).addStroke(stroke(p2, 140, 40)).build()
+        )
+    }
+
+    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 350): Boolean {
+        dbg("swipe ($x1,$y1) -> ($x2,$y2) ${durationMs}ms")
+        val p = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
+        return dispatchBlocking(GestureDescription.Builder().addStroke(stroke(p, 0, durationMs)).build())
+    }
+
+    /**
+     * Desliza desde (x, y). Mismo criterio que scroll(): ARRIBA/IZQUIERDA = ver contenido anterior
+     * (el dedo se mueve hacia abajo/derecha); ABAJO/DERECHA = ver contenido posterior.
+     */
+    private fun swipeFrom(x: Float, y: Float, dir: ScrollDirection, w: Int, h: Int): Boolean {
+        val dy = h * 0.35f
+        val dx = w * 0.35f
+        val maxX = (w - 1).toFloat(); val maxY = (h - 1).toFloat()
+        return when (dir) {
+            ScrollDirection.UP    -> swipe(x, y, x, (y + dy).coerceAtMost(maxY))
+            ScrollDirection.DOWN  -> swipe(x, y, x, (y - dy).coerceAtLeast(0f))
+            ScrollDirection.LEFT  -> swipe(x, y, (x + dx).coerceAtMost(maxX), y)
+            ScrollDirection.RIGHT -> swipe(x, y, (x - dx).coerceAtLeast(0f), y)
+        }
+    }
+
+    /**
+     * Pulsa un nodo como lo haría un ratón: ACTION_CLICK sobre el nodo o su primer ancestro
+     * pulsable y, si no hay o falla, un toque real en el centro de sus límites.
+     * Devuelve "click", "gesture" o null si no se pudo.
+     */
+    private fun clickNode(node: AccessibilityNodeInfo): String? {
+        var n: AccessibilityNodeInfo? = node
+        var depth = 0
+        while (n != null && depth < 6) {
+            if (n.isClickable && n.isEnabled) {
+                if (n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return "click"
+                break
+            }
+            n = n.parent
+            depth++
+        }
+        val r = Rect(); node.getBoundsInScreen(r)
+        if (r.isEmpty) return null
+        return if (tapAt(r.exactCenterX(), r.exactCenterY())) "gesture" else null
+    }
+
+    private fun longClickNode(node: AccessibilityNodeInfo): Boolean {
+        var n: AccessibilityNodeInfo? = node
+        var depth = 0
+        while (n != null && depth < 6) {
+            if (n.isLongClickable && n.isEnabled && n.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) return true
+            n = n.parent
+            depth++
+        }
+        val r = Rect(); node.getBoundsInScreen(r)
+        return !r.isEmpty && longPressAt(r.exactCenterX(), r.exactCenterY())
+    }
+
+    // ----------------------------------------------------------------
+    // Cursores configurados por app
+    // ----------------------------------------------------------------
+
+    private fun noConfigMessage(): String =
+        "no hay configuración para esta aplicación" + (foregroundPackage?.let { ", paquete $it" } ?: "")
+
+    private fun describeVirtual(el: UiElement): String {
+        val sb = StringBuilder(el.displayName)
+        if (!el.description.equals(el.displayName, ignoreCase = true)) sb.append(". ").append(el.description)
+        if (!el.hasPoint && !el.hasSelector) sb.append(". solo informativo")
+        return sb.toString()
+    }
+
+    private fun pctOf(c: Coord, total: Int): Int =
+        if (c.percent) c.value.toInt() else (c.toPx(total) * 100 / total.coerceAtLeast(1)).toInt()
+
+    private fun describeVirtualDetailed(el: UiElement): String {
+        val (w, h) = screenSize()
+        val sb = StringBuilder(el.displayName).append(". ").append(el.longDescription)
+        val act = when (el.action) {
+            "longpress", "mantener" -> "mantener pulsado"
+            "doubletap", "doble" -> "doble pulsación"
+            "swipe", "deslizar" -> "deslizar"
+            else -> "pulsar"
+        }
+        if (el.hasPoint || el.hasSelector) sb.append(". acción: $act")
+        else sb.append(". solo informativo")
+        if (el.hasPoint) sb.append(". posición ${pctOf(el.x!!, w)} por ciento horizontal, ${pctOf(el.y!!, h)} por ciento vertical")
+        if (el.hasSelector) sb.append(". se localiza por selector")
+        activeConfig?.let { sb.append(". configuración de ${it.appKey}, versión ${it.configVersion ?: "general"}") }
+        return sb.toString()
+    }
+
+    private fun findByDesc(node: AccessibilityNodeInfo, needle: String, depth: Int): AccessibilityNodeInfo? {
+        if (depth > 40) return null
+        if (node.isVisibleToUser &&
+            node.contentDescription?.toString()?.lowercase()?.contains(needle) == true) return node
+        for (i in 0 until node.childCount) {
+            val c = node.getChild(i) ?: continue
+            findByDesc(c, needle, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findBySelector(el: UiElement): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        el.selId?.let { id ->
+            val full = if (id.contains(":id/")) id else "${foregroundPackage ?: root.packageName}:id/$id"
+            root.findAccessibilityNodeInfosByViewId(full).firstOrNull { it.isVisibleToUser }?.let { return it }
+        }
+        el.selText?.let { t ->
+            root.findAccessibilityNodeInfosByText(t).firstOrNull { it.isVisibleToUser }?.let { return it }
+        }
+        el.selDesc?.let { d -> findByDesc(root, d.lowercase(), 0)?.let { return it } }
+        return null
+    }
+
+    /**
+     * Ejecuta la acción de un cursor: primero por selector (id/texto/descripción), que es más
+     * robusto a cambios de diseño, y si no se encuentra, por coordenadas.
+     */
+    private fun pressElement(el: UiElement): String {
+        dbg("pressElement ${el.key} action=${el.action} point=${el.hasPoint} selector=${el.hasSelector}")
+        if (el.hasSelector) {
+            val node = findBySelector(el)
+            if (node != null) {
+                val ok = when (el.action) {
+                    "longpress", "mantener" -> longClickNode(node)
+                    "doubletap", "doble" -> {
+                        val r = Rect(); node.getBoundsInScreen(r)
+                        doubleTapAt(r.exactCenterX(), r.exactCenterY())
+                    }
+                    else -> clickNode(node) != null
+                }
+                return if (ok) "pulsado" else "no se pudo pulsar ${el.displayName}"
+            }
+            if (!el.hasPoint) return "no encuentro ${el.displayName} en la pantalla"
+            dbg("selector sin resultado, se usan coordenadas")
+        }
+        if (!el.hasPoint) return "${el.displayName} es solo informativo, no se puede pulsar"
+
+        val (w, h) = screenSize()
+        val x = el.x!!.toPx(w)
+        val y = el.y!!.toPx(h)
+        val ok = when (el.action) {
+            "longpress", "mantener" -> longPressAt(x, y, if (el.durationMs > 0) el.durationMs else 900)
+            "doubletap", "doble" -> doubleTapAt(x, y)
+            "swipe", "deslizar" -> {
+                val x2 = el.x2?.toPx(w)
+                val y2 = el.y2?.toPx(h)
+                if (x2 == null || y2 == null) return "${el.displayName} no tiene destino de deslizamiento"
+                swipe(x, y, x2, y2, if (el.durationMs > 0) el.durationMs else 350)
+            }
+            else -> tapAt(x, y, if (el.durationMs > 0) el.durationMs else 60)
+        }
+        return if (ok) "pulsado" else "no se pudo pulsar, ${gestureHint()}"
+    }
+
+    /** "cursor primer chat": selecciona el cursor y lo describe. */
+    fun cursorTo(phrase: String): String {
+        updateActiveConfig()
+        val cfg = activeConfig ?: return noConfigMessage()
+        val found = cfg.find(phrase)
+        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en ${cfg.appKey}"
+        virtualElement = found[0]
+        dbg("cursor -> ${found[0].key} (${found.size} coincidencias)")
+        return describeVirtual(found[0]) + if (found.size > 1) ". hay ${found.size} coincidencias" else ""
+    }
+
+    /** "pulsa primer chat": selecciona y ejecuta el cursor directamente. */
+    fun pressByPhrase(phrase: String): String {
+        updateActiveConfig()
+        val cfg = activeConfig ?: return noConfigMessage()
+        val found = cfg.find(phrase)
+        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en ${cfg.appKey}"
+        virtualElement = found[0]
+        return pressElement(found[0])
+    }
+
+    /** "lee cursores": lista los cursores de la app en primer plano. */
+    fun listCursors(): String {
+        updateActiveConfig()
+        val cfg = activeConfig ?: return noConfigMessage()
+        if (cfg.elements.isEmpty()) return "la configuración de ${cfg.appKey} no tiene cursores"
+        val sb = StringBuilder("En ${cfg.appKey} hay ${cfg.elements.size} cursores. ")
+        cfg.elements.take(40).forEach { el ->
+            sb.append(el.displayName)
+            if (!el.description.equals(el.displayName, ignoreCase = true)) sb.append(": ").append(el.description)
+            sb.append(". ")
+        }
+        if (cfg.elements.size > 40) sb.append("y ${cfg.elements.size - 40} más.")
+        return sb.toString().trim()
+    }
+
+    /** "recarga configuración": relee los ficheros ahora. */
+    fun reloadConfig(): String {
+        val msg = AppConfigManager.reload()
+        updateActiveConfig()
+        return msg + ". " + (activeConfig?.let { "${it.appKey}: ${it.elements.size} cursores" }
+            ?: "esta aplicación no tiene configuración")
+    }
+
+    /** "estado de la configuración": diagnóstico hablado. */
+    fun configStatus(): String {
+        updateActiveConfig()
+        return AppConfigManager.statusFor(activeConfig, foregroundPackage)
     }
 }

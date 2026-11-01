@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "_nota": "Configuración por defecto para TODOS los dispositivos. Se usan porcentajes (xPct/yPct) para que valga en cualquier pantalla. Los valores de ejemplo son ESTIMACIONES: calibra con 'lee todo' y 'elemento N, detalle' (dan las coordenadas) y corrige aquí o en el fichero de tu dispositivo.",
+  "devices": {
+    "default": {
+      "apps": {
+        "telegram": {
+          "canonical-name": "org.telegram.messenger.web",
+          "packages": ["org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.messenger.beta"],
+          "version": "13.1.0",
+          "description": "Telegram, lista de chats",
+          "ui": {
+            "menu": {
+              "gramatica": ["menú", "botón hamburguesa", "abrir menú"],
+              "descripcion": "Botón de menú, arriba a la izquierda",
+              "descripcionLarga": "Abre el menú lateral con ajustes, contactos y cuentas.",
+              "xPct": 8, "yPct": 6
+            },
+            "buscar": {
+              "gramatica": ["buscar", "lupa", "búsqueda"],
+              "descripcion": "Lupa de búsqueda, arriba a la derecha",
+              "xPct": 92, "yPct": 6
+            },
+            "chat1": {
+              "gramatica": ["primer chat", "chat uno"],
+              "descripcion": "Primer chat del listado",
+              "descripcionLarga": "El chat más reciente de la lista. Al pulsarlo se abre la conversación.",
+              "xPct": 50, "yPct": 14
+            },
+            "chat2": {
+              "gramatica": ["segundo chat", "chat dos"],
+              "descripcion": "Segundo chat del listado",
+              "xPct": 50, "yPct": 21
+            },
+            "chat3": {
+              "gramatica": ["tercer chat", "chat tres"],
+              "descripcion": "Tercer chat del listado",
+              "xPct": 50, "yPct": 28
+            },
+            "nuevoMensaje": {
+              "gramatica": ["nuevo mensaje", "botón redactar", "lápiz"],
+              "descripcion": "Botón flotante para escribir un mensaje nuevo, abajo a la derecha",
+              "xPct": 87, "yPct": 91
+            }
+          },
+          "versions": {
+            "13.1.0": {
+              "ui": {
+                "chat1": { "_nota": "Aquí iría un ajuste solo para la versión 13.1.0 o posteriores" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

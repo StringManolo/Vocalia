@@ -28,6 +28,13 @@ sealed class CommandResult {
     object UiDetail : CommandResult()
     object UiReadAll : CommandResult()
     object UiHelp : CommandResult()
+    /** "cursor primer chat": selecciona un cursor configurado de la app en primer plano. */
+    data class UiCursor(val phrase: String) : CommandResult()
+    /** "pulsa primer chat": ejecuta directamente un cursor configurado. */
+    data class UiPressPhrase(val phrase: String) : CommandResult()
+    object UiListCursors : CommandResult()
+    object UiReloadConfig : CommandResult()
+    object UiConfigInfo : CommandResult()
     data class UiSearch(val query: String) : CommandResult()
     /** Acción sobre un elemento por su número: "elemento 4, pulsa". [action] es UiRead/UiClick/UiDetail/UiScroll. */
     data class UiOnElement(val number: Int, val action: CommandResult) : CommandResult()
@@ -149,6 +156,36 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
             }
         }
         parseNumberedElement(text)?.let { return it }
+
+        // --- Cursores configurados por app (ficheros de configuración) ---
+        if (matches(text,
+                "lee cursores", "leer cursores", "lista de cursores", "lista cursores",
+                "qué cursores hay", "que cursores hay", "dime los cursores", "cursores disponibles")) {
+            return CommandResult.UiListCursors
+        }
+        if (matches(text,
+                "recarga configuración", "recarga configuracion", "recarga la configuración",
+                "recarga la configuracion", "recargar configuración", "recargar configuracion",
+                "actualiza la configuración", "actualiza la configuracion")) {
+            return CommandResult.UiReloadConfig
+        }
+        if (matches(text,
+                "estado de la configuración", "estado de la configuracion", "estado configuración",
+                "información de la configuración", "informacion de la configuracion",
+                "qué configuración hay", "que configuracion hay")) {
+            return CommandResult.UiConfigInfo
+        }
+        if (text.startsWith("cursor ")) {
+            val q = text.removePrefix("cursor ").trim()
+            if (q.isNotEmpty()) return CommandResult.UiCursor(q)
+        }
+        for (verb in listOf("pulsa en ", "pulsar en ", "toca en ", "pulsa ", "pulsar ", "toca ", "tocar ")) {
+            if (text.startsWith(verb)) {
+                val q = text.removePrefix(verb).trim()
+                // "pulsa elemento" sin número sigue siendo pulsar el elemento actual
+                if (q.isNotEmpty() && !q.startsWith("elemento")) return CommandResult.UiPressPhrase(q)
+            }
+        }
 
         // ============================================================
         // Modo usar (UI navigation) — entrada / salida

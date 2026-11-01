@@ -38,6 +38,8 @@ Añadir lo de usar apps (ahora mismo solo abre y cierra, useless).
 
 - Abrir automáticmanete la config del servicio de accesibilidad / pedirlo programáticamente
 
+- Manejar los eco / loops de audio al escucharse a si mismo sin auriculares (requiere testeos y rediseño de la lógica)
+
 - Añadir modo "dormir" automático. Cuando la app pasa mucho tiempo sin recibir "VOCALIA" se "desactiva" pasando de escuchar todo el tiempo a solo escuchar durante un periodo muy breve cada X segundos. (Objetivo, ahorrar recursos / bateria cuando no se está usando  ya que está diseñada para estar siempre activa). 
 
 - Intentar **tirar** la app por voz, reiniciando el dispositivo, apagado por falta de batería, etc. JAMÁS, debe dejar de funcionar una vez configurado. 
