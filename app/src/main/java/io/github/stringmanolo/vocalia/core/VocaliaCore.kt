@@ -1,7 +1,10 @@
 package io.github.stringmanolo.vocalia.core
 
+import android.content.Context
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import io.github.stringmanolo.vocalia.VocaliaAccessibilityService
 import io.github.stringmanolo.vocalia.VoskEngine
 import io.github.stringmanolo.vocalia.tts.TtsManager
@@ -55,6 +58,8 @@ class VocaliaCore(
             "he iniciado sesión", "estoy conectado", "estado de la sesión", "tengo la sesión iniciada",
             "qué webs conoces", "lista de webs", "abre la web de", "abre la web", "ve a la web de",
             "ir a la web de", "navega a", "entra en la web de",
+            "ayuda general", "ayuda de esta aplicación", "ayuda de esta pantalla", "ayuda de esta web",
+            "ayuda accesibilidad", "lee cursor", "lee los cursores",
             "ayuda aplicaciones", "ayuda pantalla", "ayuda lectura", "ayuda cursores", "ayuda webs",
             "ayuda sesión", "ayuda voz", "ayuda escucha", "ayuda escritura", "ayuda completa",
             "salir del modo pantalla", "sal del modo pantalla", "salir de la pantalla",
@@ -188,6 +193,35 @@ class VocaliaCore(
     // Ciclo de vida
     // ----------------------------------------------------------------
 
+    /** Contexto de la aplicación (lo asigna el servicio): sirve para abrir los ajustes de accesibilidad. */
+    var appContext: Context? = null
+
+    /** Pitido distinto al terminar de hablar, para saber que ya acabó (el TTS va por tramos). */
+    private val endBeepEnabled = true
+
+    init {
+        ttsManager.onSpeechFinished = { if (endBeepEnabled) voskEngine.beepEnd() }
+    }
+
+    /** Abre la pantalla de ajustes de accesibilidad del sistema. */
+    private fun openAccessibilitySettings(): Boolean {
+        val ctx = appContext ?: return false
+        return try {
+            ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (t: Throwable) {
+            log("openAccessibilitySettings THREW ${t.javaClass.simpleName}: ${t.message}")
+            false
+        }
+    }
+
+    /** Explica cómo activar la accesibilidad y abre los ajustes a la vez. */
+    private fun accessibilityGuide(after: () -> Unit) {
+        log("accessibilityGuide: abriendo ajustes de accesibilidad")
+        openAccessibilitySettings()
+        speakAndReturn(HelpTopics.ACCESSIBILITY_GUIDE, after)
+    }
+
     /** Se invoca cuando Vosk ya escucha (para poder dar la bienvenida). */
     var onVoskReady: (() -> Unit)? = null
 
@@ -217,7 +251,9 @@ class VocaliaCore(
                 ttsManager.setEngineAsync(TtsManager.EngineMode.SHERPA) { ok, msg ->
                     mainHandler.post {
                         log("welcome: voz inteligente ok=$ok msg=$msg")
-                        speakBlocking(HelpTopics.WELCOME_GUIDE) { enterIdle() }
+                        val noA11y = VocaliaAccessibilityService.instance == null
+                        speakBlocking(HelpTopics.WELCOME_GUIDE +
+                            (if (noA11y) " " + HelpTopics.WELCOME_NO_ACCESSIBILITY else "")) { enterIdle() }
                     }
                 }
             }
@@ -441,7 +477,7 @@ class VocaliaCore(
             val svc = VocaliaAccessibilityService.instance
             if (svc == null) {
                 log("a11y: servicio no disponible")
-                speakAndReturn("Hay que activar Vocalia en los ajustes de accesibilidad del móvil. Pide ayuda a otra persona para hacerlo una vez.") {
+                accessibilityGuide {
                     leaveUiMode()
                 }
                 return@post
@@ -620,13 +656,34 @@ class VocaliaCore(
             }
             CommandResult.Help -> {
                 log("Help solicitado returnTo=$returnTo")
-                speakBlocking(if (returnTo == State.UI_NAVIGATION) HelpTopics.MENU_PANTALLA else HelpTopics.MENU_GENERAL) {
-                    afterExecution()
+                // Si la app/web en primer plano tiene ayuda propia, se da esa; si no, la general.
+                mainHandler.post {
+                    val ctxHelp = try { VocaliaAccessibilityService.instance?.contextHelp() } catch (t: Throwable) { null }
+                    val general = if (returnTo == State.UI_NAVIGATION) HelpTopics.MENU_PANTALLA else HelpTopics.MENU_GENERAL
+                    speakBlocking(ctxHelp ?: general) { afterExecution() }
+                }
+            }
+            CommandResult.HelpContext -> {
+                mainHandler.post {
+                    val ctxHelp = try { VocaliaAccessibilityService.instance?.contextHelp() } catch (t: Throwable) { null }
+                    speakBlocking(ctxHelp ?: ("No tengo ayuda especial para esta pantalla. " +
+                        (if (returnTo == State.UI_NAVIGATION) HelpTopics.MENU_PANTALLA else HelpTopics.MENU_GENERAL))) {
+                        afterExecution()
+                    }
                 }
             }
             is CommandResult.HelpTopic -> {
                 log("HelpTopic ${parsed.topic}")
-                speakBlocking(HelpTopics.topic(parsed.topic) ?: HelpTopics.MENU_GENERAL) { afterExecution() }
+                when (parsed.topic) {
+                    "accesibilidad" -> {
+                        openAccessibilitySettings()
+                        speakBlocking(HelpTopics.ACCESSIBILITY_GUIDE) { afterExecution() }
+                    }
+                    "general" -> speakBlocking(
+                        if (returnTo == State.UI_NAVIGATION) HelpTopics.MENU_PANTALLA else HelpTopics.MENU_GENERAL
+                    ) { afterExecution() }
+                    else -> speakBlocking(HelpTopics.topic(parsed.topic) ?: HelpTopics.MENU_GENERAL) { afterExecution() }
+                }
             }
             CommandResult.UiHelp -> {
                 log("UiHelp solicitado")
@@ -716,7 +773,7 @@ class VocaliaCore(
                 val svc = VocaliaAccessibilityService.instance
                 if (svc == null) {
                     log("EnterUiMode: accesibilidad no disponible")
-                    speakAndReturn("Para usar el modo pantalla hay que activar Vocalia en los ajustes de accesibilidad del móvil. Pide ayuda a otra persona para hacerlo una vez.") {
+                    accessibilityGuide {
                         afterExecution()
                     }
                 } else {

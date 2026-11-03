@@ -8,9 +8,14 @@ lo que Vocalia también te explica hablando: en cualquier momento di **"vocalia,
 - **Para hablarle, di siempre "vocalia" primero**, y después lo que quieras. Por ejemplo: *"vocalia, abre WhatsApp"*.
 - Para que se calle mientras habla: *"vocalia, para"*. Para que siga: *"vocalia, continúa"*.
 - Solo se detiene si pulsas el botón de detener en la aplicación.
+- **Cuando Vocalia termina de hablar suena un pitido de dos tonos.** Si oyes una pausa pero no ese pitido, sigue hablando por tramos.
 
-## 2. Pedir ayuda, por temas
-Di *"vocalia, ayuda"* y te dirá los temas. Después: *"vocalia, ayuda"* y el tema:
+## 2. Pedir ayuda
+- ***"vocalia, ayuda"***: si tienes delante una aplicación o web que Vocalia conoce (Telegram, Contactos, Gmail…), te da **la ayuda de esa aplicación**: qué puedes hacer en ella, cuántos cursores tiene y cómo oírlos. Si no la conoce, te da la ayuda general.
+- ***"vocalia, ayuda general"***: siempre la ayuda general, que te dice los temas.
+- *"vocalia, ayuda de esta aplicación"*: fuerza la de la aplicación.
+
+Después de la general, pide un tema con *"vocalia, ayuda"* y el tema:
 
 | Tema | Qué explica |
 | :--- | :--- |
@@ -22,6 +27,7 @@ Di *"vocalia, ayuda"* y te dirá los temas. Después: *"vocalia, ayuda"* y el te
 | sesión | saber si tienes la cuenta iniciada |
 | voz | cambiar y controlar la voz |
 | escucha | hablar sin decir "vocalia" cada vez |
+| accesibilidad | cómo activar la accesibilidad (abre los ajustes) |
 | completa | todo seguido |
 
 ## 3. Aplicaciones
@@ -70,7 +76,7 @@ Para algunas aplicaciones y webs, Vocalia sabe dónde están los botones y qué 
 - *"vocalia, descansa"* → deja de escuchar órdenes.
 
 ## 8. Si algo no funciona
-- **No reconoce el modo pantalla**: activa Vocalia en *Ajustes → Accesibilidad*.
+- **No reconoce el modo pantalla**: falta activar Vocalia en los ajustes de accesibilidad. Di *"vocalia, ayuda accesibilidad"*: te explica cómo y abre los ajustes. Hay que buscar Vocalia en la lista, pulsarla, activar el interruptor y aceptar el aviso. Solo se hace una vez.
 - **No pulsa donde debe**: di *"qué pantalla es"*; puede que Vocalia no reconozca la pantalla. Fuérzala con *"pantalla"* y su nombre.
 - **Un botón no existe en la lista**: di *"lee todo"* y usa su número.
 - Quien te ayude puede mirar el registro de la aplicación y los ficheros de configuración (ver `vocalia-configs-LEEME.md`).

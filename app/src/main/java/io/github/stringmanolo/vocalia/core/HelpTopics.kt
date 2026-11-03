@@ -18,11 +18,26 @@ object HelpTopics {
         "Para saber qué hay en la pantalla del móvil, di: vocalia, modo pantalla. " +
         "Ahora te escucho."
 
+    /** Se dice (y se abren los ajustes) cuando falta activar el servicio de accesibilidad. */
+    const val ACCESSIBILITY_GUIDE =
+        "Para usar el modo pantalla hay que activar Vocalia en los ajustes de accesibilidad. " +
+        "Te los abro ahora. " +
+        "En la lista, busca Vocalia: puede estar en servicios instalados o en servicios descargados. " +
+        "Pulsa sobre Vocalia. Activa el interruptor y acepta el aviso del sistema. " +
+        "Después vuelve atrás y di: vocalia, modo pantalla. " +
+        "Solo hay que hacerlo una vez. Si no lo consigues, pide ayuda a otra persona."
+
+    const val WELCOME_NO_ACCESSIBILITY =
+        "Antes de usar el modo pantalla falta activar la accesibilidad. " +
+        "Para que te explique cómo y abra los ajustes, di: vocalia, ayuda accesibilidad."
+
     // ---- Menús ----
     const val MENU_GENERAL =
         "Puedes pedirme ayuda sobre un tema. Di: vocalia, ayuda, y el tema. " +
-        "Los temas son: aplicaciones, pantalla, lectura, cursores, webs, sesión, voz, y escucha continua. " +
+        "Los temas son: aplicaciones, pantalla, lectura, cursores, webs, sesión, accesibilidad, voz, y escucha continua. " +
         "Por ejemplo, di: vocalia, ayuda aplicaciones. " +
+        "Si estás dentro de una aplicación con ayuda propia, di solo: vocalia, ayuda, y te explico lo de esa aplicación. " +
+        "Para volver a esta ayuda general, di: vocalia, ayuda general. " +
         "Si quieres oír todo de una vez, di: vocalia, ayuda completa."
 
     const val MENU_PANTALLA =
@@ -86,6 +101,8 @@ object HelpTopics {
             "Mientras tanto, pide a una persona de confianza que inicie la sesión una vez. " +
             "Después, la sesión suele mantenerse.",
 
+        "accesibilidad" to ACCESSIBILITY_GUIDE,
+
         "voz" to
             "Ayuda sobre mi voz. " +
             "Para usar la voz natural, di: vocalia, usa voz inteligente. " +
@@ -121,12 +138,18 @@ object HelpTopics {
             "voz", "voces", "hablar" -> "voz"
             "escucha", "escucha continua", "continua", "continuo" -> "escucha"
             "escribir", "escritura", "dictado", "teclado" -> "escritura"
+            "accesibilidad", "activar accesibilidad", "ajustes de accesibilidad" -> "accesibilidad"
+            "general", "generales", "basica", "básica", "inicio" -> "general"
             "completa", "completo", "todo", "todas" -> "completa"
             else -> null
         }
     }
 
-    fun topic(key: String): String? = if (key == "completa") full() else topics[key]
+    fun topic(key: String): String? = when (key) {
+        "completa" -> full()
+        "general" -> MENU_GENERAL
+        else -> topics[key]
+    }
 
     /** Todos los temas seguidos (para "ayuda completa"). */
     fun full(): String =

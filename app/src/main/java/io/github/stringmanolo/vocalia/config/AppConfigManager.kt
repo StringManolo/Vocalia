@@ -75,7 +75,9 @@ data class UiScreen(
     /** Pantalla que se usa si no se reconoce ninguna otra. */
     val isDefault: Boolean,
     val detect: ScreenDetect?,
-    val elements: List<UiElement>
+    val elements: List<UiElement>,
+    /** Ayuda propia de esta pantalla (opcional). */
+    val help: String? = null
 )
 
 /** Cómo saber si hay sesión iniciada en una web/app. */
@@ -105,7 +107,9 @@ data class AppUiConfig(
     val url: String? = null,
     val login: LoginRules? = null,
     /** Nombre hablado de la web/app. */
-    val spokenName: String = appKey
+    val spokenName: String = appKey,
+    /** Ayuda propia de la app/web, definida en el JSON (se dice con "vocalia, ayuda"). */
+    val help: String? = null
 ) {
     fun defaultScreen(): UiScreen? = screens.firstOrNull { it.isDefault }
 
@@ -514,7 +518,8 @@ object AppConfigManager {
             kind = kind,
             url = app.ciStr("url"),
             login = parseLogin(app.ciObj("login", "sesion", "sesión")),
-            spokenName = app.ciStr("name", "nombre") ?: appKey
+            spokenName = app.ciStr("name", "nombre") ?: appKey,
+            help = helpText(app.ci("help", "ayuda"))
         )
     }
 
@@ -529,6 +534,14 @@ object AppConfigManager {
             parseElement(key, o)?.let { e -> out.add(e) }
         }
         return out
+    }
+
+    /** La ayuda puede ser un texto o una lista de frases (se unen). */
+    private fun helpText(v: Any?): String? = when (v) {
+        is String -> v.trim().takeIf { it.isNotEmpty() }
+        is JSONArray -> (0 until v.length()).map { v.optString(it).trim() }.filter { it.isNotEmpty() }
+            .joinToString(" ").takeIf { it.isNotEmpty() }
+        else -> null
     }
 
     private fun parseLogin(o: JSONObject?): LoginRules? {
@@ -591,7 +604,8 @@ object AppConfigManager {
             description = o.ciStr("descripcion", "descripción", "description") ?: phrases.first(),
             isDefault = o.ci("default", "porDefecto", "por_defecto") == true,
             detect = parseDetect(o.ciObj("detect", "detectar")),
-            elements = m.values.toList()
+            elements = m.values.toList(),
+            help = helpText(o.ci("help", "ayuda"))
         )
     }
 

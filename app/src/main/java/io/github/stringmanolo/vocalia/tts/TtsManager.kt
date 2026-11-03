@@ -158,6 +158,9 @@ class TtsManager(private val context: Context) {
         return true
     }
 
+    /** Se invoca cuando una locución termina del todo y con normalidad (no al pausar ni al detener). */
+    var onSpeechFinished: (() -> Unit)? = null
+
     private fun launchSpeakThread(
         engine: TtsEngine,
         startIndex: Int,
@@ -167,6 +170,7 @@ class TtsManager(private val context: Context) {
         val localChunks = chunks
         val th = Thread({
             var started = false
+            var completed = false
             try {
                 var idx = startIndex
                 while (idx < localChunks.size) {
@@ -213,6 +217,7 @@ class TtsManager(private val context: Context) {
 
                     idx++
                 }
+                if (!stopped) completed = true
             } catch (t: Throwable) {
                 dbg("speak: THREW ${t.javaClass.simpleName}: ${t.message}")
             } finally {
@@ -222,6 +227,9 @@ class TtsManager(private val context: Context) {
                 stopped = false
                 pendingChunks = emptyList()
                 pendingStartIndex = -1
+                if (completed) {
+                    try { onSpeechFinished?.invoke() } catch (_: Throwable) {}
+                }
                 onComplete?.invoke()
             }
         }, "tts-chunk")

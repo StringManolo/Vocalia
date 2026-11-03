@@ -33,6 +33,8 @@ sealed class CommandResult {
     /** "pulsa primer chat": ejecuta directamente un cursor configurado. */
     data class UiPressPhrase(val phrase: String) : CommandResult()
     object UiListCursors : CommandResult()
+    /** "ayuda" dentro de una app/web con ayuda propia, o "ayuda de esta aplicación". */
+    object HelpContext : CommandResult()
     /** "ayuda aplicaciones": ayuda por temas. [topic] es la clave normalizada. */
     data class HelpTopic(val topic: String) : CommandResult()
     /** "¿dónde estoy?": app, web, pantalla, sesión y resumen de lo que hay. */
@@ -152,6 +154,17 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         // ============================================================
         // Ayuda por temas, preguntas sobre la pantalla y webs
         // ============================================================
+        if (matches(text, "ayuda de esta aplicación", "ayuda de esta aplicacion", "ayuda de esta app",
+                "ayuda de esta pantalla", "ayuda de esta web", "ayuda de esta página", "ayuda de esta pagina",
+                "ayuda específica", "ayuda especifica", "ayuda aquí", "ayuda aqui")) {
+            return CommandResult.HelpContext
+        }
+        if (matches(text, "cómo activo la accesibilidad", "como activo la accesibilidad",
+                "cómo activo accesibilidad", "como activo accesibilidad", "activar accesibilidad",
+                "activa la accesibilidad", "abre los ajustes de accesibilidad", "abre ajustes de accesibilidad",
+                "ajustes de accesibilidad", "abre accesibilidad")) {
+            return CommandResult.HelpTopic("accesibilidad")
+        }
         if (text.startsWith("ayuda ")) {
             HelpTopics.normalizeTopic(text.removePrefix("ayuda "))?.let { return CommandResult.HelpTopic(it) }
         }
@@ -236,6 +249,18 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         }
 
         // --- Cursores configurados por app (ficheros de configuración) ---
+        // Vosk a veces entiende "lee cursor" (singular) o "lee los cursores": todas valen para listar.
+        run {
+            val toks = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+            val starters = setOf("lee", "leer", "lista", "listar", "dime", "oír", "oir", "cuáles", "cuales",
+                "qué", "que", "muestra", "mostrar", "cursores", "cursor", "los")
+            if (toks.isNotEmpty() && toks.size <= 4 &&
+                toks.any { it == "cursor" || it == "cursores" } &&
+                toks[0] in starters &&
+                !(toks[0] == "cursor" && toks.size >= 2 && toks[1] !in setOf("lista", "disponibles", "hay"))) {
+                return CommandResult.UiListCursors
+            }
+        }
         if (matches(text,
                 "lee cursores", "leer cursores", "lista de cursores", "lista cursores",
                 "qué cursores hay", "que cursores hay", "dime los cursores", "cursores disponibles")) {

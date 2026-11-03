@@ -133,7 +133,9 @@ class VocaliaAccessibilityService : AccessibilityService() {
     /** Recuerda la última app "real" en primer plano (ignora Vocalia, teclados y la barra del sistema). */
     private fun noteWindowPackage(pkg: CharSequence?) {
         val p = pkg?.toString() ?: return
-        if (p == packageName || p in ignoredPackages) return
+        // Con Vocalia delante no hay app "en primer plano" cuyo ayuda o configuración aplicar
+        if (p == packageName) { foregroundPackage = null; return }
+        if (p in ignoredPackages) return
         if (p != foregroundPackage) {
             foregroundPackage = p
             dbg("app en primer plano: $p")
@@ -719,7 +721,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
         }
 
         return when {
-            name == null -> "sin nombre. ${parts.joinToString(", ")}"
+            name == null -> "${role} sin nombre" + (parts.drop(1).takeIf { it.isNotEmpty() }?.let { ", " + it.joinToString(", ") } ?: "")
             weak -> "$name. ${parts.joinToString(", ")}, sin etiqueta, nombre deducido del identificador"
             else -> "$name. ${parts.joinToString(", ")}"
         }
@@ -775,7 +777,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
         val node = getCurrentNode() ?: return "no hay elemento seleccionado"
         var desc = describeNode(node)
         val n = numberOf(node)
-        if (n > 0) desc += ". elemento $n"
+        if (n > 0) desc += ". Número $n"
         dbg("read [$currentIndex/${interactiveNodes.size - 1}] -> \"$desc\"")
         return desc
     }
@@ -1339,6 +1341,36 @@ class VocaliaAccessibilityService : AccessibilityService() {
         val c = cursorsHere().size
         if (c > 0) sb.append("Hay $c cursores preparados: di lee cursores. ")
         sb.append("Para oír toda la pantalla di: lee todo. Para más ayuda di: ayuda.")
+        return sb.toString()
+    }
+
+    /**
+     * Ayuda de la app o web que hay delante (definida en el JSON), o null si no tiene configuración.
+     * Dice cuántos cursores tiene declarados y cómo oírlos, y cómo pedir la ayuda general.
+     */
+    fun contextHelp(): String? {
+        updateActiveConfig()
+        val web = webConfig
+        val app = activeConfig
+        if (web == null && app == null) return null
+        val sb = StringBuilder()
+        val title = web?.spokenName ?: app!!.spokenName
+        sb.append("Ayuda para $title. ")
+        // Primero la de la web (más específica) y luego la de la app
+        listOfNotNull(web?.help, app?.help).distinct().forEach { sb.append(it).append(' ') }
+        val screen: UiScreen? = (if (web != null) webScreen else currentScreen) ?: currentScreen
+        if (screen != null && screen.help != null) {
+            sb.append("Pantalla ${screen.displayName}: ").append(screen.help).append(' ')
+        }
+        val here = cursorsHere().size
+        val declared = (web?.let { it.globalElements.size + it.screens.sumOf { s -> s.elements.size } } ?: 0) +
+                       (app?.let { it.globalElements.size + it.screens.sumOf { s -> s.elements.size } } ?: 0)
+        sb.append("Tiene $declared cursores declarados")
+        if (here > 0) sb.append(", y en esta pantalla hay $here")
+        sb.append(". Di: vocalia, lee cursores, para oír lo que se puede pulsar. ")
+        sb.append("Di: vocalia, lee los campos, para saber dónde se puede escribir. ")
+        sb.append("Di: vocalia, dónde estoy, para saber qué hay delante. ")
+        sb.append("Si lo que querías era la ayuda general, di: vocalia, ayuda general.")
         return sb.toString()
     }
 

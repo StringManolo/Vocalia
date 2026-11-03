@@ -72,6 +72,7 @@ class VocaliaService : Service() {
             log = { msg -> InternalDebug.mark("[core] $msg") }
         )
 
+        core.appContext = applicationContext
         core.onVoskReady = { voskReady = true; maybeWelcome() }
         ttsManager.onEngineReady = {
             InternalDebug.mark("Service: TTS listo, arrancando core")
@@ -114,6 +115,9 @@ class VocaliaService : Service() {
             "guia", "comandos", "lista de comandos", "que comandos tienes",
 
             // === Ayuda por temas y modo pantalla (nombres nuevos) ===
+            "ayuda general", "ayuda de esta aplicación", "ayuda de esta aplicacion", "ayuda de esta pantalla",
+            "ayuda de esta web", "ayuda accesibilidad", "como activo la accesibilidad", "cómo activo la accesibilidad",
+            "activar accesibilidad", "abre los ajustes de accesibilidad",
             "ayuda aplicaciones", "ayuda pantalla", "ayuda lectura", "ayuda cursores", "ayuda webs",
             "ayuda sesion", "ayuda sesión", "ayuda voz", "ayuda escucha", "ayuda escritura", "ayuda completa",
             "modo pantalla", "activa el modo pantalla", "entra en el modo pantalla",

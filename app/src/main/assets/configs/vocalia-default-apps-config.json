@@ -257,7 +257,8 @@
                   "xPct": 73,
                   "yPct": 50
                 }
-              }
+              },
+              "help": "Estás viendo tus pestañas. Di: pulsa primera pestaña, segunda pestaña, o nueva pestaña."
             },
             "menuAbierto": {
               "gramatica": [
@@ -366,9 +367,16 @@
                   "direction": "down",
                   "times": 2
                 }
-              }
+              },
+              "help": "El menú de Chrome está abierto. Puedes decir: pulsa historial, descargas, marcadores o configuración."
             }
-          }
+          },
+          "help": [
+            "Chrome es el navegador de internet.",
+            "Para abrir una web conocida, di: vocalia, abre la web de, y su nombre.",
+            "Para ver las pestañas abiertas, di: vocalia, pulsa pestañas. Para el menú, di: vocalia, pulsa menú.",
+            "Si buscas algo del menú que no se ve, por ejemplo configuración, di: vocalia, pulsa configuración, y bajaré por el menú hasta encontrarlo."
+          ]
         },
         "telegram": {
           "canonical-name": "org.telegram.messenger.web",
@@ -549,7 +557,8 @@
                   "xPct": 88,
                   "yPct": 91
                 }
-              }
+              },
+              "help": "Estás en la lista de chats. Puedes decir: pulsa primer chat, segundo chat, y así hasta noveno chat."
             },
             "chat": {
               "_nota": "ESTIMADO. Conversación abierta. Reglas de detección de ejemplo: calibrar con el log.",
@@ -636,7 +645,8 @@
                   "xPct": 92,
                   "yPct": 94
                 }
-              }
+              },
+              "help": "Estás dentro de una conversación. Para escribir, di: vocalia, pulsa campo de mensaje. Para enviar, di: vocalia, pulsa enviar. Para volver, di: vocalia, atrás."
             },
             "ajustes": {
               "_nota": "ESTIMADO. Pestaña de ajustes de Telegram.",
@@ -691,7 +701,8 @@
                   "xPct": 50,
                   "yPct": 78
                 }
-              }
+              },
+              "help": "Estás en los ajustes de Telegram. Puedes decir: pulsa notificaciones, privacidad o idioma."
             },
             "contactos": {
               "_nota": "ESTIMADO. Solo con la barra de pestañas hasta que se calibre.",
@@ -717,7 +728,13 @@
               "ui": {}
             }
           },
-          "name": "Telegram"
+          "name": "Telegram",
+          "help": [
+            "Telegram sirve para enviar y recibir mensajes.",
+            "En la lista de chats, di: vocalia, pulsa primer chat, para abrir el más reciente. Con segundo chat, tercer chat y así hasta el noveno.",
+            "Para escribir un mensaje nuevo, di: vocalia, pulsa nuevo mensaje.",
+            "Para leer lo que te han escrito, abre el chat y di: vocalia, lee los textos."
+          ]
         },
         "whatsapp": {
           "canonical-name": "com.whatsapp",
@@ -906,7 +923,12 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "WhatsApp sirve para enviar y recibir mensajes y hacer llamadas.",
+            "Para abrir una conversación, di: vocalia, lee los textos, y elige el chat por su número.",
+            "Para empezar una conversación nueva, di: vocalia, pulsa nuevo chat."
+          ]
         },
         "youtube": {
           "canonical-name": "com.google.android.youtube",
@@ -1003,7 +1025,11 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "YouTube sirve para ver vídeos.",
+            "Para buscar un vídeo, di: vocalia, pulsa buscar. Para pausar o reanudar, di: vocalia, pulsa pausa."
+          ]
         },
         "gmail": {
           "canonical-name": "com.google.android.gm",
@@ -1074,7 +1100,12 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "Gmail es tu correo electrónico.",
+            "Para escribir un correo nuevo, di: vocalia, pulsa redactar.",
+            "Para oír tus correos, di: vocalia, lee los textos."
+          ]
         },
         "ajustes": {
           "canonical-name": "com.android.settings",
@@ -1227,7 +1258,12 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "Aquí cambias los ajustes del móvil.",
+            "Para ir a un apartado, di: vocalia, pulsa, y su nombre: wifi, bluetooth, pantalla, sonido, batería, aplicaciones, accesibilidad, idioma.",
+            "Si el apartado no se ve, bajaré por la lista hasta encontrarlo."
+          ]
         },
         "spotify": {
           "canonical-name": "com.spotify.music",
@@ -1311,7 +1347,11 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "Spotify sirve para escuchar música.",
+            "Para buscar música, di: vocalia, pulsa buscar. Para pausar o reanudar, di: vocalia, pulsa reproducir."
+          ]
         },
         "maps": {
           "canonical-name": "com.google.android.apps.maps",
@@ -1382,7 +1422,11 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "Maps sirve para buscar lugares y calcular rutas.",
+            "Para buscar un sitio, di: vocalia, pulsa buscar. Para ir a un sitio, di: vocalia, pulsa cómo llegar."
+          ]
         },
         "instagram": {
           "canonical-name": "com.instagram.android",
@@ -1448,7 +1492,11 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "Instagram sirve para ver fotos y vídeos de la gente que sigues.",
+            "Para moverte, di: vocalia, pulsa inicio, buscar, reels o perfil."
+          ]
         },
         "facebook": {
           "canonical-name": "com.facebook.katana",
@@ -1513,7 +1561,11 @@
                 }
               }
             }
-          }
+          },
+          "help": [
+            "Facebook sirve para ver novedades de tus amigos.",
+            "Para moverte, di: vocalia, pulsa inicio, amigos, notificaciones o menú."
+          ]
         },
         "x": {
           "canonical-name": "com.twitter.android",
@@ -1563,6 +1615,207 @@
                       "Nueva publicación",
                       "New post",
                       "Publicar"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "help": [
+            "X, antes Twitter, sirve para leer y escribir publicaciones cortas.",
+            "Para escribir una, di: vocalia, pulsa publicar."
+          ]
+        },
+        "contactos": {
+          "canonical-name": "com.google.android.contacts",
+          "name": "Contactos",
+          "packages": [
+            "com.google.android.contacts",
+            "com.android.contacts",
+            "com.huawei.contacts",
+            "com.samsung.android.contacts",
+            "com.samsung.android.app.contacts"
+          ],
+          "description": "Agenda de contactos",
+          "help": [
+            "Aquí están tus contactos, ordenados por nombre.",
+            "Para buscar a una persona, di: vocalia, pulsa buscar, y después escribe su nombre.",
+            "Para llamar, abre un contacto con: vocalia, lee todo, y elige su número con: vocalia, elemento, y su número, pulsa.",
+            "Para añadir un contacto nuevo, di: vocalia, pulsa nuevo contacto."
+          ],
+          "screens": {
+            "lista": {
+              "default": true,
+              "gramatica": [
+                "lista de contactos",
+                "principal"
+              ],
+              "descripcion": "Lista de contactos",
+              "help": "Estás en la lista. Para oír los contactos que se ven, di: vocalia, lee los textos.",
+              "ui": {
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "lupa",
+                    "buscar contacto"
+                  ],
+                  "descripcion": "Busca un contacto por nombre",
+                  "selector": {
+                    "desc": [
+                      "Buscar",
+                      "Search",
+                      "Buscar contactos",
+                      "Search contacts"
+                    ],
+                    "text": [
+                      "Buscar contactos",
+                      "Search contacts"
+                    ]
+                  }
+                },
+                "nuevo": {
+                  "gramatica": [
+                    "nuevo contacto",
+                    "añadir contacto",
+                    "crear contacto"
+                  ],
+                  "descripcion": "Añade un contacto nuevo",
+                  "selector": {
+                    "desc": [
+                      "Crear contacto",
+                      "Create contact",
+                      "Añadir contacto",
+                      "Add contact"
+                    ]
+                  }
+                },
+                "menu": {
+                  "gramatica": [
+                    "menú",
+                    "más opciones"
+                  ],
+                  "descripcion": "Más opciones de la agenda",
+                  "selector": {
+                    "desc": [
+                      "Más opciones",
+                      "More options"
+                    ]
+                  }
+                },
+                "favoritos": {
+                  "gramatica": [
+                    "favoritos"
+                  ],
+                  "descripcion": "Tus contactos favoritos",
+                  "selector": {
+                    "text": [
+                      "Favoritos",
+                      "Favorites"
+                    ]
+                  }
+                },
+                "contactos": {
+                  "gramatica": [
+                    "contactos"
+                  ],
+                  "descripcion": "Todos los contactos",
+                  "selector": {
+                    "text": [
+                      "Contactos",
+                      "Contacts"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "telefono": {
+          "canonical-name": "com.google.android.dialer",
+          "name": "Teléfono",
+          "packages": [
+            "com.google.android.dialer",
+            "com.android.dialer",
+            "com.samsung.android.dialer"
+          ],
+          "description": "Llamadas",
+          "help": [
+            "Aquí puedes llamar por teléfono.",
+            "Para marcar un número, di: vocalia, pulsa teclado.",
+            "Para ver las llamadas recientes, di: vocalia, pulsa recientes.",
+            "Para llamar a un contacto, di: vocalia, pulsa contactos."
+          ],
+          "screens": {
+            "principal": {
+              "default": true,
+              "gramatica": [
+                "principal",
+                "teléfono"
+              ],
+              "descripcion": "Pantalla del teléfono",
+              "ui": {
+                "teclado": {
+                  "gramatica": [
+                    "teclado",
+                    "marcar número"
+                  ],
+                  "descripcion": "Abre el teclado para marcar",
+                  "selector": {
+                    "desc": [
+                      "Teclado",
+                      "Keypad",
+                      "Teclado de marcación"
+                    ]
+                  }
+                },
+                "recientes": {
+                  "gramatica": [
+                    "recientes",
+                    "últimas llamadas"
+                  ],
+                  "descripcion": "Llamadas recientes",
+                  "selector": {
+                    "text": [
+                      "Recientes",
+                      "Recents"
+                    ]
+                  }
+                },
+                "contactos": {
+                  "gramatica": [
+                    "contactos"
+                  ],
+                  "descripcion": "Tus contactos",
+                  "selector": {
+                    "text": [
+                      "Contactos",
+                      "Contacts"
+                    ]
+                  }
+                },
+                "favoritos": {
+                  "gramatica": [
+                    "favoritos"
+                  ],
+                  "descripcion": "Favoritos",
+                  "selector": {
+                    "text": [
+                      "Favoritos",
+                      "Favorites"
+                    ]
+                  }
+                },
+                "llamar": {
+                  "gramatica": [
+                    "llamar",
+                    "descolgar"
+                  ],
+                  "descripcion": "Inicia la llamada al número escrito",
+                  "selector": {
+                    "desc": [
+                      "Llamar",
+                      "Call",
+                      "Marcar"
                     ]
                   }
                 }
@@ -1664,7 +1917,8 @@
               ]
             },
             "hint": "Para buscar no hace falta iniciar sesión."
-          }
+          },
+          "help": "Google es el buscador. Para buscar, di: vocalia, pulsa buscador, y escribe lo que quieres encontrar. Después di: vocalia, pulsa buscar con google."
         },
         "x.com": {
           "name": "X",
@@ -1777,7 +2031,8 @@
               ]
             },
             "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
-          }
+          },
+          "help": "X sirve para leer y escribir publicaciones. Necesita tener la sesión iniciada. Para escribir una, di: vocalia, pulsa publicar."
         },
         "marca.com": {
           "name": "Marca",
@@ -1870,7 +2125,8 @@
                 ]
               }
             }
-          }
+          },
+          "help": "Marca es un diario deportivo. Si sale el aviso de cookies, di: vocalia, pulsa aceptar cookies. Para ir a una sección, di: vocalia, pulsa fútbol, baloncesto o motor."
         },
         "instagram.com": {
           "name": "Instagram",
@@ -1951,7 +2207,8 @@
               ]
             },
             "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
-          }
+          },
+          "help": "Instagram necesita tener la sesión iniciada. Para moverte, di: vocalia, pulsa inicio, buscar o perfil."
         },
         "youtube.com": {
           "name": "YouTube",
@@ -2040,7 +2297,8 @@
               ]
             },
             "hint": "Puedes ver vídeos sin iniciar sesión."
-          }
+          },
+          "help": "YouTube sirve para ver vídeos. Para buscar, di: vocalia, pulsa buscar. Para pausar o reanudar, di: vocalia, pulsa pausa."
         },
         "facebook.com": {
           "name": "Facebook",
@@ -2138,7 +2396,8 @@
               ]
             },
             "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
-          }
+          },
+          "help": "Facebook necesita tener la sesión iniciada. Para moverte, di: vocalia, pulsa inicio, amigos, notificaciones o menú."
         },
         "amazon.es": {
           "name": "Amazon",
@@ -2234,7 +2493,8 @@
               ]
             },
             "hint": "Puedes mirar productos sin cuenta, pero para comprar hay que iniciar sesión."
-          }
+          },
+          "help": "Amazon es una tienda. Para buscar un producto, di: vocalia, pulsa buscador. Para ver tu carrito, di: vocalia, pulsa carrito. Para comprar hay que haber iniciado sesión."
         },
         "chatgpt.com": {
           "name": "ChatGPT",
@@ -2336,7 +2596,8 @@
               ]
             },
             "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
-          }
+          },
+          "help": "ChatGPT es un asistente de inteligencia artificial. Necesita tener la sesión iniciada. Para hacerle una pregunta, di: vocalia, pulsa campo de mensaje, y después pulsa enviar."
         },
         "web.whatsapp.com": {
           "name": "WhatsApp Web",
@@ -2408,7 +2669,8 @@
               ]
             },
             "hint": "Hay que vincular el móvil escaneando un código QR desde otro dispositivo. Pide ayuda a otra persona."
-          }
+          },
+          "help": "WhatsApp Web permite usar WhatsApp en el navegador. Hay que vincularlo antes con un código QR. Para buscar un chat, di: vocalia, pulsa buscar."
         },
         "deepseek.com": {
           "name": "DeepSeek",
@@ -2515,7 +2777,8 @@
               ]
             },
             "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
-          }
+          },
+          "help": "DeepSeek es un asistente de inteligencia artificial. Necesita tener la sesión iniciada. Para hacerle una pregunta, di: vocalia, pulsa campo de mensaje, y después pulsa enviar."
         },
         "wikipedia.org": {
           "name": "Wikipedia",
@@ -2575,7 +2838,8 @@
                 ]
               }
             }
-          }
+          },
+          "help": "Wikipedia es una enciclopedia. Para buscar un artículo, di: vocalia, pulsa buscar. Para leerlo, di: vocalia, lee los textos."
         },
         "github.com": {
           "name": "GitHub",
@@ -2671,7 +2935,8 @@
               ]
             },
             "hint": "Puedes mirar proyectos públicos sin iniciar sesión."
-          }
+          },
+          "help": "GitHub sirve para ver y compartir código. Para buscar, di: vocalia, pulsa buscar. Para entrar con tu cuenta, di: vocalia, pulsa iniciar sesión."
         },
         "mail.google.com": {
           "name": "Gmail",
@@ -2803,7 +3068,8 @@
               ]
             },
             "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
-          }
+          },
+          "help": "Gmail es tu correo. Necesita tener la sesión iniciada. Para escribir un correo, di: vocalia, pulsa redactar. Para ver tus correos, di: vocalia, pulsa recibidos."
         },
         "gist.github.com": {
           "name": "Gist",
@@ -2875,7 +3141,8 @@
               ]
             },
             "hint": "Para crear gists hay que iniciar sesión."
-          }
+          },
+          "help": "Gist sirve para compartir fragmentos de código. Para crear uno, hay que iniciar sesión y decir: vocalia, pulsa nuevo gist."
         },
         "foro.elhacker.net": {
           "name": "Foro elhacker.net",
@@ -2966,7 +3233,8 @@
               ]
             },
             "hint": "Para escribir en el foro hay que entrar con tu usuario."
-          }
+          },
+          "help": "Es el foro de elhacker punto net, de informática y seguridad. Para buscar, di: vocalia, pulsa buscar. Para ver lo último, di: vocalia, pulsa mensajes recientes."
         },
         "translate.google.com": {
           "name": "Google Traductor",
@@ -3037,7 +3305,8 @@
                 ]
               }
             }
-          }
+          },
+          "help": "Google Traductor sirve para traducir textos. Para escribir el texto, di: vocalia, pulsa texto de origen. Para cambiar de idioma, di: vocalia, pulsa idioma de destino."
         }
       }
     }
@@ -3050,6 +3319,7 @@
     "5_cursor": "gramatica (frases), descripcion, descripcionLarga, xPct/yPct (porcentaje) o x/y (píxeles), selector {id,text,desc} (cada uno puede ser una lista de alternativas), action (tap|longpress|doubletap|swipe|scroll), scroll {mode:auto|none,maxSteps,resetFirst}.",
     "6_selector": "Si hay selector se busca el elemento real en pantalla; si no está a la vista, se desplaza la lista hasta encontrarlo (scroll auto). Si no aparece, se usan las coordenadas.",
     "7_login": "login {required, loggedIn{any|all|none}, loggedOut{...}, hint}. Vocalia avisa de si hay sesión iniciada al entrar en el modo pantalla y con 'he iniciado sesión'.",
-    "8_calibrar": "'lee todo' + 'elemento N, detalle' dan coordenadas; 'qué pantalla es' + el log muestran textos/ids visibles para escribir reglas detect y selectores."
+    "8_calibrar": "'lee todo' + 'elemento N, detalle' dan coordenadas; 'qué pantalla es' + el log muestran textos/ids visibles para escribir reglas detect y selectores.",
+    "9_ayuda": "help (texto o lista de frases) en una app, una web o una pantalla: es lo que se dice con 'vocalia, ayuda' cuando esa app/web está delante. Vocalia añade cuántos cursores tiene declarados y cómo oírlos, y 'ayuda general' para la ayuda general."
   }
 }

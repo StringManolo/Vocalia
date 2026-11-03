@@ -94,6 +94,24 @@ class VoskEngine(private val context: Context) {
         model = null
     }
 
+    /**
+     * Pitido de FIN DE HABLA: dos tonos seguidos, distinto del pitido simple de "te escucho".
+     * Avisa de que Vocalia ha terminado de hablar (el TTS va por tramos y, sin esto, no se sabe
+     * si ha acabado).
+     */
+    fun beepEnd() {
+        Thread {
+            var tg: ToneGenerator? = null
+            try {
+                tg = ToneGenerator(AudioManager.STREAM_MUSIC, 60)
+                tg.startTone(ToneGenerator.TONE_PROP_ACK, 250)
+                Thread.sleep(320)
+            } catch (_: Throwable) {} finally {
+                try { tg?.release() } catch (_: Throwable) {}
+            }
+        }.start()
+    }
+
     fun beep() {
         Thread {
             var tg: ToneGenerator? = null
