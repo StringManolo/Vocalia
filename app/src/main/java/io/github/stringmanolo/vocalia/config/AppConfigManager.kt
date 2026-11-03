@@ -38,10 +38,20 @@ data class UiElement(
     val x: Coord?, val y: Coord?,
     val x2: Coord?, val y2: Coord?,
     val durationMs: Long,
-    val selId: String?, val selText: String?, val selDesc: String?
+    /** Selectores (se prueban en orden; cada uno puede tener varias alternativas, p. ej. es/en). */
+    val selIds: List<String>, val selTexts: List<String>, val selDescs: List<String>,
+    /** "auto" = si el elemento no está a la vista, desplazar hasta encontrarlo; "none" = no desplazar. */
+    val scrollMode: String,
+    val scrollMax: Int,
+    /** Volver al principio de la lista antes de buscar hacia abajo. */
+    val scrollReset: Boolean,
+    /** Para action = "scroll": "down" | "up". */
+    val scrollDir: String,
+    /** Para action = "scroll": cuántas veces. */
+    val scrollTimes: Int
 ) {
     val hasPoint: Boolean get() = x != null && y != null
-    val hasSelector: Boolean get() = selId != null || selText != null || selDesc != null
+    val hasSelector: Boolean get() = selIds.isNotEmpty() || selTexts.isNotEmpty() || selDescs.isNotEmpty()
 }
 
 /** Condición para reconocer una pantalla por lo que hay en el árbol de accesibilidad. */
@@ -68,7 +78,17 @@ data class UiScreen(
     val elements: List<UiElement>
 )
 
-/** Configuración ya resuelta (dispositivo + versión instalada) de una app. */
+/** Cómo saber si hay sesión iniciada en una web/app. */
+data class LoginRules(
+    /** La web no sirve sin iniciar sesión (Gmail, ChatGPT, DeepSeek…). */
+    val required: Boolean,
+    val loggedIn: ScreenDetect?,
+    val loggedOut: ScreenDetect?,
+    /** Qué decir al usuario si no hay sesión. */
+    val hint: String?
+)
+
+/** Configuración ya resuelta (dispositivo + versión instalada) de una app o web. */
 data class AppUiConfig(
     val appKey: String,
     val packageName: String,
@@ -78,7 +98,14 @@ data class AppUiConfig(
     val description: String,
     /** Cursores válidos en cualquier pantalla de la app. */
     val globalElements: List<UiElement>,
-    val screens: List<UiScreen>
+    val screens: List<UiScreen>,
+    /** "app" o "web". */
+    val kind: String = "app",
+    /** Dirección de inicio (solo webs). */
+    val url: String? = null,
+    val login: LoginRules? = null,
+    /** Nombre hablado de la web/app. */
+    val spokenName: String = appKey
 ) {
     fun defaultScreen(): UiScreen? = screens.firstOrNull { it.isDefault }
 
@@ -143,6 +170,10 @@ object AppConfigManager {
     private var apps: Map<String, JSONObject> = emptyMap()
     /** paquete -> appKey */
     private var packageIndex: Map<String, String> = emptyMap()
+    /** webKey -> objeto de la web ya fusionado */
+    private var webs: Map<String, JSONObject> = emptyMap()
+    /** dominio -> webKey */
+    private var domainIndex: Map<String, String> = emptyMap()
     private var fingerprint: String = ""
     private val problems = mutableListOf<String>()
     private val applied = mutableListOf<String>()
@@ -234,7 +265,7 @@ object AppConfigManager {
     // ----------------------------------------------------------------
 
     private fun listFiles(): List<File> =
-        dir?.listFiles { f -> f.isFile && f.name.startsWith("vocalia-") && f.name.endsWith(".json") }
+        dir?.listFiles { f -> f.isFile && f.name.startsWith("vocalia-") && f.name.endsWith("-apps-config.json") }
             ?.sortedBy { it.name } ?: emptyList()
 
     private fun computeFingerprint(files: List<File>): String =
@@ -249,7 +280,7 @@ object AppConfigManager {
         return true
     }
 
-    private class Entry(val spec: Int, val file: String, val deviceKey: String, val apps: JSONObject)
+    private class Entry(val spec: Int, val file: String, val deviceKey: String, val apps: JSONObject?, val webs: JSONObject?)
 
     /** 0 = todos, 1 = fabricante, 2 = modelo, null = no es para este dispositivo. */
     private fun specificity(key: String, obj: JSONObject?): Int? {
@@ -314,24 +345,48 @@ object AppConfigManager {
                 val devKey = dIter.next()
                 val dev = devices.optJSONObject(devKey) ?: continue
                 val spec = specificity(devKey, dev) ?: continue
-                val appsObj = dev.ciObj("apps", "aplicaciones") ?: continue
-                entries.add(Entry(spec, f.name, devKey, appsObj))
+                val appsObj = dev.ciObj("apps", "aplicaciones")
+                val websObj = dev.ciObj("webs", "sitios")
+                if (appsObj == null && websObj == null) continue
+                entries.add(Entry(spec, f.name, devKey, appsObj, websObj))
             }
         }
 
         entries.sortWith(compareBy<Entry>({ it.spec }, { it.file }))
         val merged = linkedMapOf<String, JSONObject>()
+        val mergedWebs = linkedMapOf<String, JSONObject>()
         for (e in entries) {
             applied.add("${e.file}:${e.deviceKey}(${e.spec})")
-            val aIter = e.apps.keys()
-            while (aIter.hasNext()) {
-                val appKey = aIter.next()
-                val obj = e.apps.optJSONObject(appKey) ?: continue
-                val id = appKey.trim().lowercase()
-                merged[id] = merged[id]?.let { old -> deepMerge(old, obj) } ?: JSONObject(obj.toString())
+            e.apps?.let { appsObj ->
+                val aIter = appsObj.keys()
+                while (aIter.hasNext()) {
+                    val appKey = aIter.next()
+                    val obj = appsObj.optJSONObject(appKey) ?: continue
+                    val id = appKey.trim().lowercase()
+                    merged[id] = merged[id]?.let { old -> deepMerge(old, obj) } ?: JSONObject(obj.toString())
+                }
+            }
+            e.webs?.let { websObj ->
+                val wIter = websObj.keys()
+                while (wIter.hasNext()) {
+                    val webKey = wIter.next()
+                    val obj = websObj.optJSONObject(webKey) ?: continue
+                    val id = webKey.trim().lowercase()
+                    mergedWebs[id] = mergedWebs[id]?.let { old -> deepMerge(old, obj) } ?: JSONObject(obj.toString())
+                }
             }
         }
         apps = merged
+        webs = mergedWebs
+        val dIndex = hashMapOf<String, String>()
+        for ((key, obj) in mergedWebs) {
+            (obj.ci("domains", "dominios") as? JSONArray)?.let { a ->
+                for (i in 0 until a.length()) a.optString(i).trim().lowercase().removePrefix("www.")
+                    .takeIf { d -> d.isNotEmpty() }?.let { d -> dIndex[d] = key }
+            }
+            if (key.contains('.')) dIndex[key.removePrefix("www.")] = key
+        }
+        domainIndex = dIndex
 
         val index = hashMapOf<String, String>()
         for ((key, obj) in merged) {
@@ -345,10 +400,10 @@ object AppConfigManager {
         }
         packageIndex = index
 
-        val msg = "configuración cargada: ${merged.size} aplicaciones de ${files.size} ficheros; " +
+        val msg = "configuración cargada: ${merged.size} aplicaciones y ${mergedWebs.size} webs de ${files.size} ficheros; " +
                   "secciones aplicadas: $applied" + if (problems.isNotEmpty()) "; ERRORES: $problems" else ""
         log(msg)
-        return "configuración cargada, ${merged.size} aplicaciones" +
+        return "configuración cargada, ${merged.size} aplicaciones y ${mergedWebs.size} webs" +
                if (problems.isNotEmpty()) ", con ${problems.size} errores en ficheros" else ""
     }
 
@@ -378,8 +433,39 @@ object AppConfigManager {
     fun configFor(pkg: String): AppUiConfig? {
         val appKey = packageIndex[pkg] ?: return null
         val app = apps[appKey] ?: return null
-        val installed = installedVersion(pkg)
+        return resolve(appKey, app, pkg, installedVersion(pkg), "app")
+    }
 
+    /**
+     * Configuración de la web cuyo dominio coincide con [host] (p. ej. "www.google.com" o
+     * "mail.google.com"), o null. Se prefiere el dominio más específico.
+     */
+    @Synchronized
+    fun webFor(host: String?): AppUiConfig? {
+        val h = host?.trim()?.lowercase()?.removePrefix("www.") ?: return null
+        if (h.isEmpty()) return null
+        val key = domainIndex.entries
+            .filter { (d, _) -> h == d || h.endsWith(".$d") }
+            .maxByOrNull { it.key.length }?.value ?: return null
+        val obj = webs[key] ?: return null
+        return resolve(key, obj, "web:$key", null, "web")
+    }
+
+    /** Webs conocidas: (clave, nombres hablados, dirección de inicio, descripción). */
+    class WebInfo(val key: String, val phrases: List<String>, val url: String?, val description: String)
+
+    @Synchronized
+    fun allWebs(): List<WebInfo> = webs.map { (key, obj) ->
+        val phrases = LinkedHashSet<String>()
+        stringList(obj.ci("gramatica", "gramática", "grammar", "names", "nombres")).forEach {
+            grammarPhrase(it).takeIf { p -> p.isNotEmpty() }?.let { p -> phrases.add(p) }
+        }
+        val first = (obj.ciStr("name", "nombre") ?: keyToWords(key.substringBefore('.')))
+        grammarPhrase(first).takeIf { it.isNotEmpty() }?.let { phrases.add(it) }
+        WebInfo(key, phrases.toList(), obj.ciStr("url"), obj.ciStr("description", "descripcion", "descripción") ?: "")
+    }
+
+    private fun resolve(appKey: String, app: JSONObject, pkg: String, installed: String?, kind: String): AppUiConfig {
         var ui = app.ciObj("ui", "interfaz") ?: JSONObject()
         var screensObj = app.ciObj("screens", "pantallas") ?: JSONObject()
         var groupsObj = app.ciObj("groups", "grupos") ?: JSONObject()
@@ -402,7 +488,7 @@ object AppConfigManager {
                 vo?.ciObj("groups", "grupos")?.let { x -> groupsObj = deepMerge(groupsObj, x) }
             }
         }
-        if (chosen == null) chosen = app.ciStr("version")
+        if (chosen == null) chosen = app.ciStr("version", "fecha", "date")
 
         val groups = LinkedHashMap<String, List<UiElement>>()
         val gIter = groupsObj.keys()
@@ -424,7 +510,11 @@ object AppConfigManager {
             appKey = appKey, packageName = pkg, installedVersion = installed,
             configVersion = chosen,
             description = app.ciStr("description", "descripcion", "descripción") ?: "",
-            globalElements = parseElements(ui), screens = screens
+            globalElements = parseElements(ui), screens = screens,
+            kind = kind,
+            url = app.ciStr("url"),
+            login = parseLogin(app.ciObj("login", "sesion", "sesión")),
+            spokenName = app.ciStr("name", "nombre") ?: appKey
         )
     }
 
@@ -439,6 +529,16 @@ object AppConfigManager {
             parseElement(key, o)?.let { e -> out.add(e) }
         }
         return out
+    }
+
+    private fun parseLogin(o: JSONObject?): LoginRules? {
+        if (o == null) return null
+        return LoginRules(
+            required = o.ci("required", "obligatoria", "necesaria") == true,
+            loggedIn = parseDetect(o.ciObj("loggedIn", "conSesion", "conectado")),
+            loggedOut = parseDetect(o.ciObj("loggedOut", "sinSesion", "desconectado")),
+            hint = o.ciStr("hint", "aviso", "ayuda")
+        )
     }
 
     private fun parseCond(o: JSONObject) = DetectCond(
@@ -547,9 +647,17 @@ object AppConfigManager {
             x = coordOf(o, "x", "xPct"), y = coordOf(o, "y", "yPct"),
             x2 = coordOf(o, "x2", "x2Pct"), y2 = coordOf(o, "y2", "y2Pct"),
             durationMs = (o.ci("durationMs", "duracion", "duración") as? Number)?.toLong()?.coerceIn(20, 5000) ?: 0L,
-            selId = sel?.ciStr("id", "viewId"),
-            selText = sel?.ciStr("text", "texto"),
-            selDesc = sel?.ciStr("desc", "contentDescription", "descripcion")
+            selIds = stringList(sel?.ci("id", "viewId")),
+            selTexts = stringList(sel?.ci("text", "texto")),
+            selDescs = stringList(sel?.ci("desc", "contentDescription", "descripcion")),
+            scrollMode = (o.ciObj("scroll", "desplazar")?.ciStr("mode", "modo")
+                ?: (if (o.ci("scroll", "desplazar") is String) o.ciStr("scroll", "desplazar") else null)
+                ?: "auto").lowercase(),
+            scrollMax = (o.ciObj("scroll", "desplazar")?.ci("maxSteps", "maxPasos") as? Number)?.toInt()?.coerceIn(1, 30) ?: 8,
+            scrollReset = o.ciObj("scroll", "desplazar")?.ci("resetFirst", "alPrincipio") == true,
+            scrollDir = (o.ciStr("direction", "direccion", "dirección")
+                ?: o.ciObj("scroll", "desplazar")?.ciStr("direction", "direccion") ?: "down").lowercase(),
+            scrollTimes = (o.ci("times", "veces") as? Number)?.toInt()?.coerceIn(1, 30) ?: 1
         )
     }
 

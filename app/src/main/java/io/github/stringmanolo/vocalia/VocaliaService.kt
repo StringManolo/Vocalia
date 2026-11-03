@@ -21,6 +21,8 @@ class VocaliaService : Service() {
     companion object {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "vocalia_main_channel"
+        /** La actividad lo envía al arrancar el servicio para dar la bienvenida. */
+        const val EXTRA_WELCOME = "welcome"
 
         @Volatile var isRunning: Boolean = false
             private set
@@ -31,10 +33,27 @@ class VocaliaService : Service() {
     private lateinit var core: VocaliaCore
     private lateinit var appLauncher: AppLauncher
 
+    @Volatile private var wantWelcome = false
+    @Volatile private var voskReady = false
+    @Volatile private var welcomed = false
+
+    /** La bienvenida se da una sola vez por vida del servicio, cuando Vosk ya escucha. */
+    private fun maybeWelcome() {
+        if (wantWelcome && voskReady && !welcomed) {
+            welcomed = true
+            core.welcome()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         InternalDebug.mark("Service: onCreate")
 
+        try {
+            io.github.stringmanolo.vocalia.config.AppConfigManager.init(applicationContext)
+        } catch (t: Throwable) {
+            InternalDebug.mark("Service: AppConfigManager.init THREW ${t.javaClass.simpleName}: ${t.message}")
+        }
         appLauncher = AppLauncher(this)
         appLauncher.preload()
         val appNames = appLauncher.getAllInstalledAppNames()
@@ -53,6 +72,7 @@ class VocaliaService : Service() {
             log = { msg -> InternalDebug.mark("[core] $msg") }
         )
 
+        core.onVoskReady = { voskReady = true; maybeWelcome() }
         ttsManager.onEngineReady = {
             InternalDebug.mark("Service: TTS listo, arrancando core")
             core.start(grammar)
@@ -92,6 +112,16 @@ class VocaliaService : Service() {
             "ayuda", "que puedes hacer", "que sabes hacer",
             "dime todo lo que puedes hacer", "dime lo que puedes hacer",
             "guia", "comandos", "lista de comandos", "que comandos tienes",
+
+            // === Ayuda por temas y modo pantalla (nombres nuevos) ===
+            "ayuda aplicaciones", "ayuda pantalla", "ayuda lectura", "ayuda cursores", "ayuda webs",
+            "ayuda sesion", "ayuda sesión", "ayuda voz", "ayuda escucha", "ayuda escritura", "ayuda completa",
+            "modo pantalla", "activa el modo pantalla", "entra en el modo pantalla",
+            "controlar pantalla", "controlar la pantalla", "controlar el movil", "controlar el móvil",
+            "salir del modo pantalla", "sal del modo pantalla", "salir de la pantalla",
+            "donde estoy", "dónde estoy", "que hay en pantalla", "qué hay en pantalla",
+            "que webs conoces", "qué webs conoces", "lista de webs",
+            "abre la web de", "ve a la web de", "ir a la web de", "navega a",
 
             // === Modo usar (UI navigation) ===
             "modo usar", "activar modo usar", "activa el modo usar",
@@ -142,6 +172,20 @@ class VocaliaService : Service() {
             }
         }
 
+        // Webs conocidas (de los ficheros de configuración): "abre la web de wikipedia"
+        try {
+            for (w in io.github.stringmanolo.vocalia.config.AppConfigManager.allWebs()) {
+                for (p in w.phrases) {
+                    val clean = p.replace("\"", "").replace("\\", "").trim()
+                    if (clean.isBlank()) continue
+                    addUnique(clean)
+                    addUnique("abre la web de $clean")
+                    addUnique("ve a la web de $clean")
+                    addUnique("ir a la web de $clean")
+                }
+            }
+        } catch (_: Throwable) {}
+
         for (alias in aliases) {
             val clean = alias.replace("\"", "").replace("\\", "").trim()
             if (clean.isBlank()) continue
@@ -161,6 +205,10 @@ class VocaliaService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundCompat()
         isRunning = true
+        if (intent?.getBooleanExtra(EXTRA_WELCOME, false) == true) {
+            wantWelcome = true
+            if (::core.isInitialized) maybeWelcome()
+        }
         return START_NOT_STICKY
     }
 

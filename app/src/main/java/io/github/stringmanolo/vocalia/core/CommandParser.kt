@@ -33,6 +33,18 @@ sealed class CommandResult {
     /** "pulsa primer chat": ejecuta directamente un cursor configurado. */
     data class UiPressPhrase(val phrase: String) : CommandResult()
     object UiListCursors : CommandResult()
+    /** "ayuda aplicaciones": ayuda por temas. [topic] es la clave normalizada. */
+    data class HelpTopic(val topic: String) : CommandResult()
+    /** "¿dónde estoy?": app, web, pantalla, sesión y resumen de lo que hay. */
+    object UiWhere : CommandResult()
+    object UiReadTexts : CommandResult()
+    object UiReadButtons : CommandResult()
+    object UiReadFields : CommandResult()
+    /** "más elementos": siguiente página de la última lista leída. */
+    object UiReadMore : CommandResult()
+    object UiLoginInfo : CommandResult()
+    object UiListWebs : CommandResult()
+    data class UiOpenWeb(val name: String) : CommandResult()
     /** "pantalla ajustes": fuerza la pantalla actual de la app. */
     data class UiScreen(val name: String) : CommandResult()
     object UiScreenAuto : CommandResult()
@@ -138,6 +150,52 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         if (text.isBlank()) return CommandResult.Response("no te he entendido")
 
         // ============================================================
+        // Ayuda por temas, preguntas sobre la pantalla y webs
+        // ============================================================
+        if (text.startsWith("ayuda ")) {
+            HelpTopics.normalizeTopic(text.removePrefix("ayuda "))?.let { return CommandResult.HelpTopic(it) }
+        }
+        if (matches(text, "dónde estoy", "donde estoy", "qué hay en pantalla", "que hay en pantalla",
+                "qué hay en la pantalla", "que hay en la pantalla", "qué hay aquí", "que hay aqui",
+                "qué estoy viendo", "que estoy viendo", "en qué web estoy", "en que web estoy",
+                "en qué aplicación estoy", "en que aplicacion estoy", "en qué app estoy", "en que app estoy",
+                "resumen de la pantalla", "resume la pantalla", "describe la pantalla", "qué ves", "que ves")) {
+            return CommandResult.UiWhere
+        }
+        if (matches(text, "lee los textos", "lee textos", "leer textos", "qué textos hay", "que textos hay")) {
+            return CommandResult.UiReadTexts
+        }
+        if (matches(text, "lee los botones", "lee botones", "leer botones", "qué botones hay", "que botones hay",
+                "qué puedo pulsar", "que puedo pulsar")) {
+            return CommandResult.UiReadButtons
+        }
+        if (matches(text, "lee los campos", "lee campos", "leer campos", "qué campos hay", "que campos hay",
+                "dónde puedo escribir", "donde puedo escribir", "qué puedo escribir", "que puedo escribir")) {
+            return CommandResult.UiReadFields
+        }
+        if (matches(text, "más elementos", "mas elementos", "sigue la lista", "continúa la lista",
+                "continua la lista", "siguiente página", "siguiente pagina", "más resultados", "mas resultados")) {
+            return CommandResult.UiReadMore
+        }
+        if (matches(text, "he iniciado sesión", "he iniciado sesion", "estoy conectado", "estado de la sesión",
+                "estado de la sesion", "tengo la sesión iniciada", "tengo la sesion iniciada",
+                "estoy identificado", "tengo sesión", "tengo sesion")) {
+            return CommandResult.UiLoginInfo
+        }
+        if (matches(text, "qué webs conoces", "que webs conoces", "lista de webs", "qué páginas conoces",
+                "que paginas conoces", "webs disponibles")) {
+            return CommandResult.UiListWebs
+        }
+        for (prefix in listOf("abre la web de ", "abre la web ", "abre la página de ", "abre la pagina de ",
+                "ve a la web de ", "ve a la web ", "ir a la web de ", "ir a la web ", "navega a ",
+                "entra en la web de ", "entra en la web ")) {
+            if (text.startsWith(prefix)) {
+                val q = text.removePrefix(prefix).trim()
+                if (q.isNotEmpty()) return CommandResult.UiOpenWeb(q)
+            }
+        }
+
+        // ============================================================
         // Modo usar: ayuda, leer todo, búsqueda y elementos numerados
         // (van antes que "modo usar" y que el resto para tener prioridad)
         // ============================================================
@@ -211,6 +269,9 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
         // Modo usar (UI navigation) — entrada / salida
         // ============================================================
         if (matches(text,
+                "modo pantalla", "activa el modo pantalla", "activar modo pantalla", "entra en el modo pantalla",
+                "entra al modo pantalla", "controlar pantalla", "controlar la pantalla", "controlar el móvil",
+                "controlar el movil", "explorar pantalla", "manejar pantalla", "manejar el móvil",
                 "modo usar", "activar modo usar", "activa el modo usar",
                 "entra al modo usar", "entrar al modo usar",
                 "modo navegacion", "modo navegación",
@@ -218,6 +279,8 @@ class CommandParser(private val appLauncher: AppLauncher? = null) {
             return CommandResult.EnterUiMode
         }
         if (matches(text,
+                "salir del modo pantalla", "sal del modo pantalla", "salir de la pantalla",
+                "termina el modo pantalla", "fin del modo pantalla", "dejar de controlar la pantalla",
                 "sal del modo usar", "salir del modo usar", "salir del modo",
                 "desactiva el modo usar", "termina el modo usar", "fin del modo usar",
                 "sal del modo navegacion", "salir del modo navegacion")) {

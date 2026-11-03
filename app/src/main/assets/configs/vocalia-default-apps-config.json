@@ -1,176 +1,3055 @@
 {
-  "schema": 2,
-  "_nota": "Configuración por defecto para TODOS los dispositivos. Porcentajes (xPct/yPct) para que valga en cualquier pantalla. Cada app tiene PANTALLAS con sus propios cursores. Calibra con 'lee todo' + 'elemento N, detalle' y corrige aquí o en el fichero de tu dispositivo. Las reglas 'detect' de las pantallas de Telegram son ESTIMACIONES: si no se reconoce la pantalla, usa 'vocalia, pantalla ajustes' y mira en el log las líneas 'pantalla ->' (muestran textos, descripciones e ids visibles) para escribir reglas mejores.",
+  "schema": 3,
+  "_nota": "Configuración por defecto para TODOS los dispositivos (ver vocalia-configs-LEEME.md y GUIA_DE_USO.md). Los selectores (text/desc/id) y las coordenadas de apps y webs son ESTIMACIONES hechas sin ver las pantallas reales: calibra con 'lee todo', 'elemento N, detalle' y el log, y corrige aquí o en el fichero de tu dispositivo. Los campos que empiezan por '_' se ignoran.",
   "devices": {
     "default": {
       "apps": {
-        "telegram": {
-          "canonical-name": "org.telegram.messenger.web",
-          "packages": ["org.telegram.messenger", "org.telegram.messenger.web", "org.telegram.messenger.beta"],
-          "version": "13.1.0",
-          "description": "Telegram",
-
+        "chrome": {
+          "canonical-name": "com.android.chrome",
+          "name": "Chrome",
+          "packages": [
+            "com.android.chrome",
+            "com.chrome.beta",
+            "com.chrome.dev"
+          ],
+          "description": "Navegador Chrome",
           "groups": {
-            "pestanas": {
-              "chats": {
-                "gramatica": ["boton chats", "chats", "pestaña de chats"],
-                "descripcion": "Botón pestaña de chats",
-                "xPct": 20, "yPct": 96
+            "barra": {
+              "direccion": {
+                "gramatica": [
+                  "barra de direcciones",
+                  "dirección",
+                  "omnibox",
+                  "url"
+                ],
+                "descripcion": "Barra de direcciones. Pulsa para escribir una web o buscar",
+                "xPct": 45,
+                "yPct": 7,
+                "selector": {
+                  "id": "url_bar"
+                }
               },
-              "contactos": {
-                "gramatica": ["boton contactos", "contactos", "pestaña de contactos"],
-                "descripcion": "Botón pestaña de contactos",
-                "xPct": 40, "yPct": 96
+              "pestanas": {
+                "gramatica": [
+                  "pestañas",
+                  "cambiar de pestaña",
+                  "selector de pestañas"
+                ],
+                "descripcion": "Muestra todas las pestañas abiertas",
+                "xPct": 78,
+                "yPct": 7,
+                "selector": {
+                  "id": "tab_switcher_button"
+                }
               },
-              "ajustes": {
-                "gramatica": ["boton ajustes", "ajustes", "pestaña de ajustes"],
-                "descripcion": "Botón pestaña de ajustes",
-                "xPct": 60, "yPct": 96
-              },
-              "perfil": {
-                "gramatica": ["boton perfil", "perfil", "pestaña de perfil"],
-                "descripcion": "Botón pestaña de perfil",
-                "xPct": 80, "yPct": 96
+              "menu": {
+                "gramatica": [
+                  "menú",
+                  "tres puntos",
+                  "más opciones"
+                ],
+                "descripcion": "Menú de Chrome, arriba a la derecha",
+                "xPct": 93,
+                "yPct": 7,
+                "selector": {
+                  "id": "menu_button"
+                }
               }
             }
           },
-
-          "ui": {},
-
           "screens": {
-            "listaChats": {
+            "pagina": {
               "default": true,
-              "gramatica": ["lista de chats", "pantalla principal", "principal"],
-              "descripcion": "Lista de chats de Telegram",
-              "include": ["pestanas"],
+              "gramatica": [
+                "página web",
+                "página",
+                "navegando"
+              ],
+              "descripcion": "Página web abierta",
+              "include": [
+                "barra"
+              ],
               "ui": {
-                "menu": {
-                  "gramatica": ["menú", "botón hamburguesa", "abrir menú"],
-                  "descripcion": "Botón de menú, arriba a la izquierda",
-                  "descripcionLarga": "Abre el menú lateral con ajustes, contactos y cuentas.",
-                  "xPct": 8, "yPct": 6
+                "inicio": {
+                  "gramatica": [
+                    "inicio",
+                    "botón inicio"
+                  ],
+                  "descripcion": "Va a la página de inicio, si el botón está activado",
+                  "xPct": 7,
+                  "yPct": 7,
+                  "selector": {
+                    "id": "home_button"
+                  }
                 },
-                "buscar": {
-                  "gramatica": ["buscar", "lupa", "búsqueda"],
-                  "descripcion": "Lupa de búsqueda, arriba a la derecha",
-                  "xPct": 85, "yPct": 6
+                "recargar": {
+                  "gramatica": [
+                    "recargar",
+                    "actualizar página"
+                  ],
+                  "descripcion": "Recarga la página, desde el menú",
+                  "selector": {
+                    "desc": [
+                      "Recargar",
+                      "Reload"
+                    ]
+                  }
                 },
-                "chat1": {
-                  "gramatica": ["primer chat", "chat uno"],
-                  "descripcion": "Primer chat del listado",
-                  "descripcionLarga": "El chat más reciente de la lista. Al pulsarlo se abre la conversación.",
-                  "xPct": 50, "yPct": 28
+                "subir": {
+                  "gramatica": [
+                    "subir",
+                    "arriba del todo"
+                  ],
+                  "descripcion": "Desliza hacia arriba la página",
+                  "xPct": 50,
+                  "yPct": 40,
+                  "action": "swipe",
+                  "x2Pct": 50,
+                  "y2Pct": 80
                 },
-                "chat2": { "gramatica": ["segundo chat", "chat dos"],   "descripcion": "Segundo chat del listado", "xPct": 50, "yPct": 35 },
-                "chat3": { "gramatica": ["tercer chat", "chat tres"],   "descripcion": "Tercer chat del listado",  "xPct": 50, "yPct": 42 },
-                "chat4": { "gramatica": ["cuarto chat", "chat cuatro"], "descripcion": "Cuarto chat del listado",  "xPct": 50, "yPct": 49 },
-                "chat5": { "gramatica": ["quinto chat", "chat cinco"],  "descripcion": "Quinto chat del listado",  "xPct": 50, "yPct": 57 },
-                "chat6": { "gramatica": ["sexto chat", "chat seis"],    "descripcion": "Sexto chat del listado",   "xPct": 50, "yPct": 64 },
-                "chat7": { "gramatica": ["séptimo chat", "chat siete"], "descripcion": "Séptimo chat del listado", "xPct": 50, "yPct": 71 },
-                "chat8": { "gramatica": ["octavo chat", "chat ocho"],   "descripcion": "Octavo chat del listado",  "xPct": 50, "yPct": 78 },
-                "chat9": { "gramatica": ["noveno chat", "chat nueve"],  "descripcion": "Noveno chat del listado",  "xPct": 50, "yPct": 85 },
-                "nuevoMensaje": {
-                  "gramatica": ["nuevo mensaje", "nuevo chat"],
-                  "descripcion": "Botón flotante para escribir un mensaje nuevo, abajo a la derecha",
-                  "xPct": 88, "yPct": 91
+                "bajar": {
+                  "gramatica": [
+                    "bajar",
+                    "siguiente pantalla"
+                  ],
+                  "descripcion": "Desliza la página hacia abajo",
+                  "xPct": 50,
+                  "yPct": 75,
+                  "action": "swipe",
+                  "x2Pct": 50,
+                  "y2Pct": 30
                 }
               }
             },
-
+            "nuevaPestana": {
+              "gramatica": [
+                "nueva pestaña",
+                "página de inicio de chrome"
+              ],
+              "descripcion": "Nueva pestaña con buscador y accesos directos",
+              "include": [
+                "barra"
+              ],
+              "detect": {
+                "any": [
+                  {
+                    "id": "search_box_text"
+                  },
+                  {
+                    "id": "search_provider_logo"
+                  }
+                ],
+                "priority": 2
+              },
+              "ui": {
+                "inicio": {
+                  "gramatica": [
+                    "inicio",
+                    "botón inicio"
+                  ],
+                  "descripcion": "Va a la página de inicio, si el botón está activado",
+                  "xPct": 7,
+                  "yPct": 7,
+                  "selector": {
+                    "id": "home_button"
+                  }
+                },
+                "buscador": {
+                  "gramatica": [
+                    "buscador",
+                    "buscar en google",
+                    "caja de búsqueda"
+                  ],
+                  "descripcion": "Caja de búsqueda de la página nueva",
+                  "xPct": 50,
+                  "yPct": 22,
+                  "selector": {
+                    "id": "search_box_text"
+                  }
+                },
+                "acceso1": {
+                  "gramatica": [
+                    "primer acceso",
+                    "acceso uno"
+                  ],
+                  "descripcion": "Primer acceso directo",
+                  "xPct": 20,
+                  "yPct": 38
+                },
+                "acceso2": {
+                  "gramatica": [
+                    "segundo acceso",
+                    "acceso dos"
+                  ],
+                  "descripcion": "Segundo acceso directo",
+                  "xPct": 50,
+                  "yPct": 38
+                }
+              }
+            },
+            "selectorPestanas": {
+              "gramatica": [
+                "lista de pestañas",
+                "todas las pestañas"
+              ],
+              "descripcion": "Cuadrícula con las pestañas abiertas",
+              "detect": {
+                "any": [
+                  {
+                    "id": "tab_list_recycler_view"
+                  },
+                  {
+                    "id": "tab_list_view"
+                  },
+                  {
+                    "id": "new_tab_button"
+                  }
+                ],
+                "priority": 3
+              },
+              "ui": {
+                "nuevaPestana": {
+                  "gramatica": [
+                    "nueva pestaña",
+                    "añadir pestaña",
+                    "más"
+                  ],
+                  "descripcion": "Abre una pestaña nueva",
+                  "xPct": 50,
+                  "yPct": 93,
+                  "selector": {
+                    "id": "new_tab_button"
+                  }
+                },
+                "pestana1": {
+                  "gramatica": [
+                    "primera pestaña",
+                    "pestaña uno"
+                  ],
+                  "descripcion": "Primera pestaña de la cuadrícula",
+                  "xPct": 27,
+                  "yPct": 25
+                },
+                "pestana2": {
+                  "gramatica": [
+                    "segunda pestaña",
+                    "pestaña dos"
+                  ],
+                  "descripcion": "Segunda pestaña de la cuadrícula",
+                  "xPct": 73,
+                  "yPct": 25
+                },
+                "pestana3": {
+                  "gramatica": [
+                    "tercera pestaña",
+                    "pestaña tres"
+                  ],
+                  "descripcion": "Tercera pestaña de la cuadrícula",
+                  "xPct": 27,
+                  "yPct": 50
+                },
+                "pestana4": {
+                  "gramatica": [
+                    "cuarta pestaña",
+                    "pestaña cuatro"
+                  ],
+                  "descripcion": "Cuarta pestaña de la cuadrícula",
+                  "xPct": 73,
+                  "yPct": 50
+                }
+              }
+            },
+            "menuAbierto": {
+              "gramatica": [
+                "menú abierto",
+                "opciones de chrome"
+              ],
+              "descripcion": "Menú desplegable de Chrome",
+              "detect": {
+                "any": [
+                  {
+                    "text": "Nueva pestaña de incógnito"
+                  },
+                  {
+                    "text": "Historial"
+                  },
+                  {
+                    "text": "Descargas"
+                  },
+                  {
+                    "text": "New incognito tab"
+                  }
+                ],
+                "none": [
+                  {
+                    "id": "tab_list_recycler_view"
+                  }
+                ],
+                "priority": 1
+              },
+              "ui": {
+                "nuevaIncognito": {
+                  "gramatica": [
+                    "incógnito",
+                    "nueva pestaña de incógnito"
+                  ],
+                  "descripcion": "Abre una pestaña de incógnito",
+                  "selector": {
+                    "text": [
+                      "New incognito tab",
+                      "Nueva pestaña de incógnito",
+                      "Nueva pestaña incógnito"
+                    ]
+                  }
+                },
+                "historial": {
+                  "gramatica": [
+                    "historial"
+                  ],
+                  "descripcion": "Páginas visitadas",
+                  "selector": {
+                    "text": [
+                      "Historial",
+                      "History"
+                    ]
+                  }
+                },
+                "descargas": {
+                  "gramatica": [
+                    "descargas"
+                  ],
+                  "descripcion": "Archivos descargados",
+                  "selector": {
+                    "text": [
+                      "Descargas",
+                      "Downloads"
+                    ]
+                  }
+                },
+                "marcadores": {
+                  "gramatica": [
+                    "marcadores",
+                    "favoritos"
+                  ],
+                  "descripcion": "Páginas guardadas",
+                  "selector": {
+                    "text": [
+                      "Marcadores",
+                      "Bookmarks"
+                    ]
+                  }
+                },
+                "configuracion": {
+                  "gramatica": [
+                    "configuración",
+                    "ajustes de chrome"
+                  ],
+                  "descripcion": "Ajustes de Chrome. Si no se ve, se desplaza el menú hasta encontrarlo",
+                  "selector": {
+                    "text": [
+                      "Configuración",
+                      "Settings"
+                    ]
+                  },
+                  "scroll": {
+                    "mode": "auto",
+                    "maxSteps": 8
+                  }
+                },
+                "bajarMenu": {
+                  "gramatica": [
+                    "bajar menú",
+                    "desplazar menú"
+                  ],
+                  "descripcion": "Desplaza el menú hacia abajo",
+                  "action": "scroll",
+                  "direction": "down",
+                  "times": 2
+                }
+              }
+            }
+          }
+        },
+        "telegram": {
+          "canonical-name": "org.telegram.messenger.web",
+          "packages": [
+            "org.telegram.messenger",
+            "org.telegram.messenger.web",
+            "org.telegram.messenger.beta"
+          ],
+          "version": "13.1.0",
+          "description": "Telegram",
+          "groups": {
+            "pestanas": {
+              "chats": {
+                "gramatica": [
+                  "boton chats",
+                  "chats",
+                  "pestaña de chats"
+                ],
+                "descripcion": "Botón pestaña de chats",
+                "xPct": 20,
+                "yPct": 96
+              },
+              "contactos": {
+                "gramatica": [
+                  "boton contactos",
+                  "contactos",
+                  "pestaña de contactos"
+                ],
+                "descripcion": "Botón pestaña de contactos",
+                "xPct": 40,
+                "yPct": 96
+              },
+              "ajustes": {
+                "gramatica": [
+                  "boton ajustes",
+                  "ajustes",
+                  "pestaña de ajustes"
+                ],
+                "descripcion": "Botón pestaña de ajustes",
+                "xPct": 60,
+                "yPct": 96
+              },
+              "perfil": {
+                "gramatica": [
+                  "boton perfil",
+                  "perfil",
+                  "pestaña de perfil"
+                ],
+                "descripcion": "Botón pestaña de perfil",
+                "xPct": 80,
+                "yPct": 96
+              }
+            }
+          },
+          "ui": {},
+          "screens": {
+            "listaChats": {
+              "default": true,
+              "gramatica": [
+                "lista de chats",
+                "pantalla principal",
+                "principal"
+              ],
+              "descripcion": "Lista de chats de Telegram",
+              "include": [
+                "pestanas"
+              ],
+              "ui": {
+                "menu": {
+                  "gramatica": [
+                    "menú",
+                    "botón hamburguesa",
+                    "abrir menú"
+                  ],
+                  "descripcion": "Botón de menú, arriba a la izquierda",
+                  "descripcionLarga": "Abre el menú lateral con ajustes, contactos y cuentas.",
+                  "xPct": 8,
+                  "yPct": 6
+                },
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "lupa",
+                    "búsqueda"
+                  ],
+                  "descripcion": "Lupa de búsqueda, arriba a la derecha",
+                  "xPct": 85,
+                  "yPct": 6
+                },
+                "chat1": {
+                  "gramatica": [
+                    "primer chat",
+                    "chat uno"
+                  ],
+                  "descripcion": "Primer chat del listado",
+                  "descripcionLarga": "El chat más reciente de la lista. Al pulsarlo se abre la conversación.",
+                  "xPct": 50,
+                  "yPct": 28
+                },
+                "chat2": {
+                  "gramatica": [
+                    "segundo chat",
+                    "chat dos"
+                  ],
+                  "descripcion": "Segundo chat del listado",
+                  "xPct": 50,
+                  "yPct": 35
+                },
+                "chat3": {
+                  "gramatica": [
+                    "tercer chat",
+                    "chat tres"
+                  ],
+                  "descripcion": "Tercer chat del listado",
+                  "xPct": 50,
+                  "yPct": 42
+                },
+                "chat4": {
+                  "gramatica": [
+                    "cuarto chat",
+                    "chat cuatro"
+                  ],
+                  "descripcion": "Cuarto chat del listado",
+                  "xPct": 50,
+                  "yPct": 49
+                },
+                "chat5": {
+                  "gramatica": [
+                    "quinto chat",
+                    "chat cinco"
+                  ],
+                  "descripcion": "Quinto chat del listado",
+                  "xPct": 50,
+                  "yPct": 57
+                },
+                "chat6": {
+                  "gramatica": [
+                    "sexto chat",
+                    "chat seis"
+                  ],
+                  "descripcion": "Sexto chat del listado",
+                  "xPct": 50,
+                  "yPct": 64
+                },
+                "chat7": {
+                  "gramatica": [
+                    "séptimo chat",
+                    "chat siete"
+                  ],
+                  "descripcion": "Séptimo chat del listado",
+                  "xPct": 50,
+                  "yPct": 71
+                },
+                "chat8": {
+                  "gramatica": [
+                    "octavo chat",
+                    "chat ocho"
+                  ],
+                  "descripcion": "Octavo chat del listado",
+                  "xPct": 50,
+                  "yPct": 78
+                },
+                "chat9": {
+                  "gramatica": [
+                    "noveno chat",
+                    "chat nueve"
+                  ],
+                  "descripcion": "Noveno chat del listado",
+                  "xPct": 50,
+                  "yPct": 85
+                },
+                "nuevoMensaje": {
+                  "gramatica": [
+                    "nuevo mensaje",
+                    "nuevo chat"
+                  ],
+                  "descripcion": "Botón flotante para escribir un mensaje nuevo, abajo a la derecha",
+                  "xPct": 88,
+                  "yPct": 91
+                }
+              }
+            },
             "chat": {
               "_nota": "ESTIMADO. Conversación abierta. Reglas de detección de ejemplo: calibrar con el log.",
-              "gramatica": ["conversación", "dentro del chat", "chat abierto"],
+              "gramatica": [
+                "conversación",
+                "dentro del chat",
+                "chat abierto"
+              ],
               "descripcion": "Conversación abierta",
               "detect": {
                 "any": [
-                  { "desc": "Adjuntar" },
-                  { "desc": "Enviar" }
+                  {
+                    "desc": "Adjuntar"
+                  },
+                  {
+                    "desc": "Enviar"
+                  }
                 ],
                 "none": [
-                  { "text": "Privacidad y seguridad" }
+                  {
+                    "text": "Privacidad y seguridad"
+                  }
                 ],
                 "priority": 1
               },
               "ui": {
                 "atras": {
-                  "gramatica": ["atrás", "volver", "botón atrás"],
+                  "gramatica": [
+                    "atrás",
+                    "volver",
+                    "botón atrás"
+                  ],
                   "descripcion": "Flecha para volver a la lista de chats, arriba a la izquierda",
-                  "xPct": 6, "yPct": 6
+                  "xPct": 6,
+                  "yPct": 6
                 },
                 "titulo": {
-                  "gramatica": ["título", "perfil del chat", "cabecera"],
+                  "gramatica": [
+                    "título",
+                    "perfil del chat",
+                    "cabecera"
+                  ],
                   "descripcion": "Nombre del contacto o grupo. Al pulsarlo se abre su perfil",
-                  "xPct": 40, "yPct": 6
+                  "xPct": 40,
+                  "yPct": 6
                 },
                 "menuChat": {
-                  "gramatica": ["menú del chat", "tres puntos", "más opciones"],
+                  "gramatica": [
+                    "menú del chat",
+                    "tres puntos",
+                    "más opciones"
+                  ],
                   "descripcion": "Menú de tres puntos del chat, arriba a la derecha",
-                  "xPct": 94, "yPct": 6
+                  "xPct": 94,
+                  "yPct": 6
                 },
                 "adjuntar": {
-                  "gramatica": ["adjuntar", "clip", "adjuntos"],
+                  "gramatica": [
+                    "adjuntar",
+                    "clip",
+                    "adjuntos"
+                  ],
                   "descripcion": "Clip para adjuntar archivos o fotos, abajo a la izquierda",
-                  "xPct": 8, "yPct": 94
+                  "xPct": 8,
+                  "yPct": 94
                 },
                 "campoMensaje": {
-                  "gramatica": ["campo de mensaje", "escribir mensaje", "caja de texto"],
+                  "gramatica": [
+                    "campo de mensaje",
+                    "escribir mensaje",
+                    "caja de texto"
+                  ],
                   "descripcion": "Campo donde se escribe el mensaje, abajo",
-                  "xPct": 45, "yPct": 94
+                  "xPct": 45,
+                  "yPct": 94
                 },
                 "enviar": {
-                  "gramatica": ["enviar", "botón enviar", "micrófono"],
+                  "gramatica": [
+                    "enviar",
+                    "botón enviar",
+                    "micrófono"
+                  ],
                   "descripcion": "Botón de enviar mensaje o grabar audio, abajo a la derecha",
-                  "xPct": 92, "yPct": 94
+                  "xPct": 92,
+                  "yPct": 94
                 }
               }
             },
-
             "ajustes": {
               "_nota": "ESTIMADO. Pestaña de ajustes de Telegram.",
-              "gramatica": ["ajustes de telegram", "configuración de telegram", "pestaña ajustes"],
+              "gramatica": [
+                "ajustes de telegram",
+                "configuración de telegram",
+                "pestaña ajustes"
+              ],
               "descripcion": "Ajustes de Telegram",
-              "include": ["pestanas"],
+              "include": [
+                "pestanas"
+              ],
               "detect": {
                 "any": [
-                  { "text": "Privacidad y seguridad" },
-                  { "text": "Datos y almacenamiento" },
-                  { "text": "Idioma" }
+                  {
+                    "text": "Privacidad y seguridad"
+                  },
+                  {
+                    "text": "Datos y almacenamiento"
+                  },
+                  {
+                    "text": "Idioma"
+                  }
                 ],
                 "priority": 2
               },
               "ui": {
                 "notificaciones": {
-                  "gramatica": ["notificaciones", "sonidos"],
+                  "gramatica": [
+                    "notificaciones",
+                    "sonidos"
+                  ],
                   "descripcion": "Ajustes de notificaciones y sonidos",
-                  "xPct": 50, "yPct": 52
+                  "xPct": 50,
+                  "yPct": 52
                 },
                 "privacidad": {
-                  "gramatica": ["privacidad", "privacidad y seguridad"],
+                  "gramatica": [
+                    "privacidad",
+                    "privacidad y seguridad"
+                  ],
                   "descripcion": "Ajustes de privacidad y seguridad",
-                  "xPct": 50, "yPct": 60
+                  "xPct": 50,
+                  "yPct": 60
                 },
                 "idioma": {
-                  "gramatica": ["idioma", "cambiar idioma"],
+                  "gramatica": [
+                    "idioma",
+                    "cambiar idioma"
+                  ],
                   "descripcion": "Cambiar el idioma de la aplicación",
-                  "xPct": 50, "yPct": 78
+                  "xPct": 50,
+                  "yPct": 78
                 }
               }
             },
-
             "contactos": {
               "_nota": "ESTIMADO. Solo con la barra de pestañas hasta que se calibre.",
-              "gramatica": ["lista de contactos", "pestaña contactos"],
+              "gramatica": [
+                "lista de contactos",
+                "pestaña contactos"
+              ],
               "descripcion": "Lista de contactos",
-              "include": ["pestanas"],
+              "include": [
+                "pestanas"
+              ],
               "detect": {
-                "any": [ { "text": "Invitar a amigos" }, { "text": "Ordenados por" } ],
+                "any": [
+                  {
+                    "text": "Invitar a amigos"
+                  },
+                  {
+                    "text": "Ordenados por"
+                  }
+                ],
                 "priority": 2
               },
               "ui": {}
+            }
+          },
+          "name": "Telegram"
+        },
+        "whatsapp": {
+          "canonical-name": "com.whatsapp",
+          "name": "WhatsApp",
+          "packages": [
+            "com.whatsapp",
+            "com.whatsapp.w4b"
+          ],
+          "description": "WhatsApp: mensajes y llamadas",
+          "screens": {
+            "chats": {
+              "default": true,
+              "gramatica": [
+                "lista de chats",
+                "principal"
+              ],
+              "descripcion": "Lista de conversaciones",
+              "ui": {
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "lupa"
+                  ],
+                  "descripcion": "Busca en tus chats",
+                  "selector": {
+                    "desc": [
+                      "Buscar",
+                      "Search"
+                    ]
+                  }
+                },
+                "menu": {
+                  "gramatica": [
+                    "menú",
+                    "tres puntos",
+                    "más opciones"
+                  ],
+                  "descripcion": "Menú con ajustes",
+                  "selector": {
+                    "desc": [
+                      "Más opciones",
+                      "More options"
+                    ]
+                  }
+                },
+                "nuevoChat": {
+                  "gramatica": [
+                    "nuevo chat",
+                    "nuevo mensaje"
+                  ],
+                  "descripcion": "Empieza una conversación nueva",
+                  "selector": {
+                    "desc": [
+                      "Nuevo chat",
+                      "New chat"
+                    ]
+                  }
+                },
+                "pestanaChats": {
+                  "gramatica": [
+                    "pestaña chats"
+                  ],
+                  "descripcion": "Pestaña de conversaciones",
+                  "selector": {
+                    "text": [
+                      "Chats"
+                    ]
+                  }
+                },
+                "pestanaNovedades": {
+                  "gramatica": [
+                    "novedades",
+                    "estados"
+                  ],
+                  "descripcion": "Pestaña de novedades",
+                  "selector": {
+                    "text": [
+                      "Novedades",
+                      "Updates"
+                    ]
+                  }
+                },
+                "pestanaLlamadas": {
+                  "gramatica": [
+                    "llamadas"
+                  ],
+                  "descripcion": "Pestaña de llamadas",
+                  "selector": {
+                    "text": [
+                      "Llamadas",
+                      "Calls"
+                    ]
+                  }
+                }
+              }
+            },
+            "conversacion": {
+              "gramatica": [
+                "conversación",
+                "chat abierto"
+              ],
+              "descripcion": "Conversación abierta",
+              "detect": {
+                "any": [
+                  {
+                    "desc": "Adjuntar"
+                  },
+                  {
+                    "desc": "Attach"
+                  },
+                  {
+                    "desc": "Enviar"
+                  },
+                  {
+                    "desc": "Send"
+                  }
+                ],
+                "priority": 1
+              },
+              "ui": {
+                "campoMensaje": {
+                  "gramatica": [
+                    "campo de mensaje",
+                    "escribir mensaje"
+                  ],
+                  "descripcion": "Donde se escribe el mensaje",
+                  "selector": {
+                    "text": [
+                      "Mensaje",
+                      "Message"
+                    ]
+                  }
+                },
+                "adjuntar": {
+                  "gramatica": [
+                    "adjuntar",
+                    "clip"
+                  ],
+                  "descripcion": "Adjuntar fotos o archivos",
+                  "selector": {
+                    "desc": [
+                      "Adjuntar",
+                      "Attach"
+                    ]
+                  }
+                },
+                "enviar": {
+                  "gramatica": [
+                    "enviar",
+                    "botón enviar"
+                  ],
+                  "descripcion": "Envía el mensaje escrito",
+                  "selector": {
+                    "desc": [
+                      "Enviar",
+                      "Send"
+                    ]
+                  }
+                },
+                "voz": {
+                  "gramatica": [
+                    "mensaje de voz",
+                    "grabar audio",
+                    "micrófono"
+                  ],
+                  "descripcion": "Graba un mensaje de voz",
+                  "selector": {
+                    "desc": [
+                      "Mensaje de voz",
+                      "Voice message"
+                    ]
+                  }
+                },
+                "llamar": {
+                  "gramatica": [
+                    "llamar",
+                    "llamada"
+                  ],
+                  "descripcion": "Llama a este contacto",
+                  "selector": {
+                    "desc": [
+                      "Llamada de voz",
+                      "Voice call"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "youtube": {
+          "canonical-name": "com.google.android.youtube",
+          "name": "YouTube",
+          "description": "YouTube: vídeos",
+          "screens": {
+            "principal": {
+              "default": true,
+              "gramatica": [
+                "principal",
+                "inicio de youtube"
+              ],
+              "descripcion": "Pantalla principal de YouTube",
+              "ui": {
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "lupa"
+                  ],
+                  "descripcion": "Busca vídeos",
+                  "selector": {
+                    "desc": [
+                      "Buscar",
+                      "Search"
+                    ]
+                  }
+                },
+                "inicio": {
+                  "gramatica": [
+                    "inicio"
+                  ],
+                  "descripcion": "Vídeos recomendados",
+                  "selector": {
+                    "text": [
+                      "Inicio",
+                      "Home"
+                    ]
+                  }
+                },
+                "shorts": {
+                  "gramatica": [
+                    "shorts",
+                    "vídeos cortos"
+                  ],
+                  "descripcion": "Vídeos cortos",
+                  "selector": {
+                    "text": [
+                      "Shorts"
+                    ]
+                  }
+                },
+                "suscripciones": {
+                  "gramatica": [
+                    "suscripciones"
+                  ],
+                  "descripcion": "Canales a los que sigues",
+                  "selector": {
+                    "text": [
+                      "Suscripciones",
+                      "Subscriptions"
+                    ]
+                  }
+                },
+                "biblioteca": {
+                  "gramatica": [
+                    "biblioteca",
+                    "tú"
+                  ],
+                  "descripcion": "Tu biblioteca e historial",
+                  "selector": {
+                    "text": [
+                      "Biblioteca",
+                      "Library",
+                      "Tú",
+                      "You"
+                    ]
+                  }
+                },
+                "pausa": {
+                  "gramatica": [
+                    "pausa",
+                    "reproducir",
+                    "play"
+                  ],
+                  "descripcion": "Pausa o reanuda el vídeo",
+                  "selector": {
+                    "desc": [
+                      "Pausar",
+                      "Reproducir",
+                      "Pause",
+                      "Play"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "gmail": {
+          "canonical-name": "com.google.android.gm",
+          "name": "Gmail",
+          "description": "Correo de Gmail",
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Añadir una dirección de correo"
+                },
+                {
+                  "text": "Add an email address"
+                }
+              ]
+            },
+            "hint": "Hay que configurar la cuenta una vez; pide ayuda a una persona de confianza."
+          },
+          "screens": {
+            "bandeja": {
+              "default": true,
+              "gramatica": [
+                "bandeja de entrada",
+                "correo"
+              ],
+              "descripcion": "Bandeja de entrada",
+              "ui": {
+                "redactar": {
+                  "gramatica": [
+                    "redactar",
+                    "nuevo correo",
+                    "escribir correo"
+                  ],
+                  "descripcion": "Escribe un correo nuevo",
+                  "selector": {
+                    "text": [
+                      "Redactar",
+                      "Compose"
+                    ]
+                  }
+                },
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "lupa"
+                  ],
+                  "descripcion": "Busca en tu correo",
+                  "selector": {
+                    "desc": [
+                      "Buscar en el correo",
+                      "Search in mail"
+                    ]
+                  }
+                },
+                "menu": {
+                  "gramatica": [
+                    "menú",
+                    "carpetas"
+                  ],
+                  "descripcion": "Abre las carpetas",
+                  "selector": {
+                    "desc": [
+                      "Abrir panel de navegación",
+                      "Open navigation drawer"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "ajustes": {
+          "canonical-name": "com.android.settings",
+          "name": "Ajustes",
+          "packages": [
+            "com.android.settings",
+            "com.huawei.systemmanager"
+          ],
+          "description": "Ajustes del móvil. Los apartados que no se ven se buscan desplazando la lista",
+          "screens": {
+            "principal": {
+              "default": true,
+              "gramatica": [
+                "principal",
+                "ajustes del móvil"
+              ],
+              "descripcion": "Lista de ajustes del móvil",
+              "ui": {
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "lupa"
+                  ],
+                  "descripcion": "Busca un ajuste",
+                  "selector": {
+                    "desc": [
+                      "Buscar",
+                      "Search"
+                    ]
+                  }
+                },
+                "wifi": {
+                  "gramatica": [
+                    "wifi",
+                    "wi fi",
+                    "redes wifi"
+                  ],
+                  "descripcion": "Redes wifi",
+                  "selector": {
+                    "text": [
+                      "Wi-Fi",
+                      "WLAN",
+                      "Wi‑Fi"
+                    ]
+                  }
+                },
+                "bluetooth": {
+                  "gramatica": [
+                    "bluetooth"
+                  ],
+                  "descripcion": "Dispositivos bluetooth",
+                  "selector": {
+                    "text": [
+                      "Bluetooth"
+                    ]
+                  }
+                },
+                "pantalla": {
+                  "gramatica": [
+                    "pantalla",
+                    "brillo"
+                  ],
+                  "descripcion": "Brillo y pantalla",
+                  "selector": {
+                    "text": [
+                      "Pantalla",
+                      "Pantalla y brillo",
+                      "Display"
+                    ]
+                  }
+                },
+                "sonido": {
+                  "gramatica": [
+                    "sonido",
+                    "volumen"
+                  ],
+                  "descripcion": "Sonido y vibración",
+                  "selector": {
+                    "text": [
+                      "Sonido",
+                      "Sonidos",
+                      "Sound"
+                    ]
+                  }
+                },
+                "bateria": {
+                  "gramatica": [
+                    "batería"
+                  ],
+                  "descripcion": "Batería",
+                  "selector": {
+                    "text": [
+                      "Batería",
+                      "Battery"
+                    ]
+                  }
+                },
+                "aplicaciones": {
+                  "gramatica": [
+                    "aplicaciones"
+                  ],
+                  "descripcion": "Lista de aplicaciones",
+                  "selector": {
+                    "text": [
+                      "Aplicaciones",
+                      "Apps"
+                    ]
+                  }
+                },
+                "accesibilidad": {
+                  "gramatica": [
+                    "accesibilidad"
+                  ],
+                  "descripcion": "Funciones de accesibilidad",
+                  "selector": {
+                    "text": [
+                      "Accesibilidad",
+                      "Accessibility",
+                      "Funciones de accesibilidad"
+                    ]
+                  }
+                },
+                "idioma": {
+                  "gramatica": [
+                    "idioma"
+                  ],
+                  "descripcion": "Idioma y teclado",
+                  "selector": {
+                    "text": [
+                      "Idioma y entrada",
+                      "Idioma",
+                      "Languages",
+                      "Idioma y teclado"
+                    ]
+                  }
+                },
+                "acercaDe": {
+                  "gramatica": [
+                    "acerca del teléfono",
+                    "información del móvil"
+                  ],
+                  "descripcion": "Versión y datos del móvil",
+                  "selector": {
+                    "text": [
+                      "Acerca del teléfono",
+                      "Acerca del móvil",
+                      "About phone"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "spotify": {
+          "canonical-name": "com.spotify.music",
+          "name": "Spotify",
+          "description": "Spotify: música",
+          "screens": {
+            "principal": {
+              "default": true,
+              "gramatica": [
+                "principal",
+                "inicio de spotify"
+              ],
+              "descripcion": "Pantalla principal de Spotify",
+              "ui": {
+                "inicio": {
+                  "gramatica": [
+                    "inicio"
+                  ],
+                  "descripcion": "Música recomendada",
+                  "selector": {
+                    "text": [
+                      "Inicio",
+                      "Home"
+                    ]
+                  }
+                },
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "lupa"
+                  ],
+                  "descripcion": "Busca música",
+                  "selector": {
+                    "text": [
+                      "Buscar",
+                      "Search"
+                    ]
+                  }
+                },
+                "biblioteca": {
+                  "gramatica": [
+                    "biblioteca",
+                    "tu biblioteca"
+                  ],
+                  "descripcion": "Tus listas y canciones",
+                  "selector": {
+                    "text": [
+                      "Tu biblioteca",
+                      "Your Library"
+                    ]
+                  }
+                },
+                "reproducir": {
+                  "gramatica": [
+                    "reproducir",
+                    "pausa",
+                    "play"
+                  ],
+                  "descripcion": "Reproduce o pausa",
+                  "selector": {
+                    "desc": [
+                      "Reproducir",
+                      "Pausa",
+                      "Play",
+                      "Pause"
+                    ]
+                  }
+                },
+                "siguiente": {
+                  "gramatica": [
+                    "siguiente canción",
+                    "saltar canción"
+                  ],
+                  "descripcion": "Pasa a la siguiente canción",
+                  "selector": {
+                    "desc": [
+                      "Siguiente",
+                      "Next"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "maps": {
+          "canonical-name": "com.google.android.apps.maps",
+          "name": "Google Maps",
+          "description": "Mapas y rutas",
+          "screens": {
+            "mapa": {
+              "default": true,
+              "gramatica": [
+                "mapa",
+                "principal"
+              ],
+              "descripcion": "Mapa",
+              "ui": {
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "buscar lugar"
+                  ],
+                  "descripcion": "Busca un lugar o dirección",
+                  "selector": {
+                    "text": [
+                      "Busca aquí",
+                      "Search here",
+                      "Buscar aquí"
+                    ]
+                  }
+                },
+                "comoLlegar": {
+                  "gramatica": [
+                    "cómo llegar",
+                    "ruta"
+                  ],
+                  "descripcion": "Calcula una ruta",
+                  "selector": {
+                    "text": [
+                      "Cómo llegar",
+                      "Directions"
+                    ]
+                  }
+                },
+                "iniciar": {
+                  "gramatica": [
+                    "iniciar",
+                    "empezar ruta"
+                  ],
+                  "descripcion": "Empieza la navegación",
+                  "selector": {
+                    "text": [
+                      "Iniciar",
+                      "Start"
+                    ]
+                  }
+                },
+                "miUbicacion": {
+                  "gramatica": [
+                    "mi ubicación",
+                    "dónde estoy"
+                  ],
+                  "descripcion": "Centra el mapa en tu posición",
+                  "selector": {
+                    "desc": [
+                      "Tu ubicación",
+                      "Your location",
+                      "Mi ubicación"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "instagram": {
+          "canonical-name": "com.instagram.android",
+          "name": "Instagram",
+          "description": "Instagram: fotos y vídeos",
+          "screens": {
+            "principal": {
+              "default": true,
+              "gramatica": [
+                "principal",
+                "inicio"
+              ],
+              "descripcion": "Pantalla principal",
+              "ui": {
+                "inicio": {
+                  "gramatica": [
+                    "inicio"
+                  ],
+                  "descripcion": "Publicaciones de la gente que sigues",
+                  "selector": {
+                    "desc": [
+                      "Inicio",
+                      "Home"
+                    ]
+                  }
+                },
+                "buscar": {
+                  "gramatica": [
+                    "buscar",
+                    "explorar"
+                  ],
+                  "descripcion": "Busca y explora",
+                  "selector": {
+                    "desc": [
+                      "Buscar y explorar",
+                      "Search and explore"
+                    ]
+                  }
+                },
+                "reels": {
+                  "gramatica": [
+                    "reels",
+                    "vídeos cortos"
+                  ],
+                  "descripcion": "Vídeos cortos",
+                  "selector": {
+                    "desc": [
+                      "Reels"
+                    ]
+                  }
+                },
+                "perfil": {
+                  "gramatica": [
+                    "perfil"
+                  ],
+                  "descripcion": "Tu perfil",
+                  "selector": {
+                    "desc": [
+                      "Perfil",
+                      "Profile"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "facebook": {
+          "canonical-name": "com.facebook.katana",
+          "name": "Facebook",
+          "description": "Facebook",
+          "screens": {
+            "principal": {
+              "default": true,
+              "gramatica": [
+                "principal",
+                "inicio"
+              ],
+              "descripcion": "Pantalla principal",
+              "ui": {
+                "inicio": {
+                  "gramatica": [
+                    "inicio"
+                  ],
+                  "descripcion": "Novedades",
+                  "selector": {
+                    "desc": [
+                      "Inicio",
+                      "Home"
+                    ]
+                  }
+                },
+                "amigos": {
+                  "gramatica": [
+                    "amigos"
+                  ],
+                  "descripcion": "Tus amigos",
+                  "selector": {
+                    "desc": [
+                      "Amigos",
+                      "Friends"
+                    ]
+                  }
+                },
+                "notificaciones": {
+                  "gramatica": [
+                    "notificaciones"
+                  ],
+                  "descripcion": "Avisos",
+                  "selector": {
+                    "desc": [
+                      "Notificaciones",
+                      "Notifications"
+                    ]
+                  }
+                },
+                "menu": {
+                  "gramatica": [
+                    "menú"
+                  ],
+                  "descripcion": "Más opciones",
+                  "selector": {
+                    "desc": [
+                      "Menú",
+                      "Menu"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x": {
+          "canonical-name": "com.twitter.android",
+          "name": "X",
+          "description": "X, antes Twitter",
+          "screens": {
+            "principal": {
+              "default": true,
+              "gramatica": [
+                "principal",
+                "inicio"
+              ],
+              "descripcion": "Pantalla principal",
+              "ui": {
+                "inicio": {
+                  "gramatica": [
+                    "inicio"
+                  ],
+                  "descripcion": "Publicaciones",
+                  "selector": {
+                    "desc": [
+                      "Inicio",
+                      "Home"
+                    ]
+                  }
+                },
+                "buscar": {
+                  "gramatica": [
+                    "buscar"
+                  ],
+                  "descripcion": "Busca publicaciones y personas",
+                  "selector": {
+                    "desc": [
+                      "Buscar y explorar",
+                      "Search and Explore"
+                    ]
+                  }
+                },
+                "publicar": {
+                  "gramatica": [
+                    "publicar",
+                    "nueva publicación"
+                  ],
+                  "descripcion": "Escribe una publicación",
+                  "selector": {
+                    "desc": [
+                      "Nueva publicación",
+                      "New post",
+                      "Publicar"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "webs": {
+        "google.com": {
+          "name": "Google",
+          "gramatica": [
+            "google",
+            "buscador",
+            "buscar en google"
+          ],
+          "url": "https://www.google.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Buscador de Google",
+          "domains": [
+            "google.com",
+            "google.es"
+          ],
+          "ui": {
+            "buscador": {
+              "gramatica": [
+                "buscador",
+                "caja de búsqueda"
+              ],
+              "descripcion": "Caja donde escribir lo que buscas",
+              "selector": {
+                "desc": [
+                  "Buscar",
+                  "Search"
+                ],
+                "text": [
+                  "Buscar",
+                  "Search"
+                ]
+              }
+            },
+            "botonBuscar": {
+              "gramatica": [
+                "buscar con google",
+                "botón buscar"
+              ],
+              "descripcion": "Lanza la búsqueda",
+              "selector": {
+                "text": [
+                  "Buscar con Google",
+                  "Google Search"
+                ]
+              }
+            },
+            "imagenes": {
+              "gramatica": [
+                "imágenes"
+              ],
+              "descripcion": "Búsqueda de imágenes",
+              "selector": {
+                "text": [
+                  "Imágenes",
+                  "Images"
+                ]
+              }
+            },
+            "iniciarSesion": {
+              "gramatica": [
+                "iniciar sesión"
+              ],
+              "descripcion": "Entrar con tu cuenta de Google",
+              "selector": {
+                "text": [
+                  "Iniciar sesión",
+                  "Log in",
+                  "Sign in",
+                  "Entrar"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": false,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                }
+              ]
+            },
+            "hint": "Para buscar no hace falta iniciar sesión."
+          }
+        },
+        "x.com": {
+          "name": "X",
+          "gramatica": [
+            "twitter",
+            "equis"
+          ],
+          "url": "https://x.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "X, antes Twitter",
+          "domains": [
+            "x.com",
+            "twitter.com"
+          ],
+          "ui": {
+            "publicar": {
+              "gramatica": [
+                "publicar",
+                "nueva publicación"
+              ],
+              "descripcion": "Escribe una publicación",
+              "selector": {
+                "desc": [
+                  "Publicar",
+                  "Post",
+                  "Nueva publicación"
+                ]
+              }
+            },
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca publicaciones y personas",
+              "selector": {
+                "desc": [
+                  "Buscar y explorar",
+                  "Search and Explore"
+                ],
+                "text": [
+                  "Buscar",
+                  "Search"
+                ]
+              }
+            },
+            "inicio": {
+              "gramatica": [
+                "inicio"
+              ],
+              "descripcion": "Tu cronología",
+              "selector": {
+                "desc": [
+                  "Inicio",
+                  "Home"
+                ]
+              }
+            },
+            "notificaciones": {
+              "gramatica": [
+                "notificaciones"
+              ],
+              "descripcion": "Avisos",
+              "selector": {
+                "desc": [
+                  "Notificaciones",
+                  "Notifications"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                },
+                {
+                  "text": "Crear cuenta"
+                },
+                {
+                  "text": "Create account"
+                }
+              ]
+            },
+            "loggedIn": {
+              "any": [
+                {
+                  "text": "Para ti"
+                },
+                {
+                  "text": "For you"
+                },
+                {
+                  "text": "Siguiendo"
+                },
+                {
+                  "text": "Following"
+                }
+              ]
+            },
+            "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
+          }
+        },
+        "marca.com": {
+          "name": "Marca",
+          "gramatica": [
+            "marca",
+            "diario marca"
+          ],
+          "url": "https://www.marca.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Diario deportivo Marca",
+          "domains": [
+            "marca.com"
+          ],
+          "ui": {
+            "aceptarCookies": {
+              "gramatica": [
+                "aceptar cookies",
+                "aceptar"
+              ],
+              "descripcion": "Acepta el aviso de cookies",
+              "selector": {
+                "text": [
+                  "Aceptar",
+                  "Aceptar y cerrar",
+                  "Accept"
+                ]
+              }
+            },
+            "menu": {
+              "gramatica": [
+                "menú",
+                "secciones"
+              ],
+              "descripcion": "Abre las secciones",
+              "selector": {
+                "desc": [
+                  "Menú",
+                  "Menu"
+                ],
+                "text": [
+                  "Menú",
+                  "Menu"
+                ]
+              }
+            },
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca noticias",
+              "selector": {
+                "desc": [
+                  "Buscar",
+                  "Search"
+                ]
+              }
+            },
+            "futbol": {
+              "gramatica": [
+                "fútbol"
+              ],
+              "descripcion": "Noticias de fútbol",
+              "selector": {
+                "text": [
+                  "Fútbol",
+                  "Futbol"
+                ]
+              }
+            },
+            "baloncesto": {
+              "gramatica": [
+                "baloncesto"
+              ],
+              "descripcion": "Noticias de baloncesto",
+              "selector": {
+                "text": [
+                  "Baloncesto"
+                ]
+              }
+            },
+            "motor": {
+              "gramatica": [
+                "motor"
+              ],
+              "descripcion": "Noticias de motor",
+              "selector": {
+                "text": [
+                  "Motor"
+                ]
+              }
+            }
+          }
+        },
+        "instagram.com": {
+          "name": "Instagram",
+          "gramatica": [
+            "instagram"
+          ],
+          "url": "https://www.instagram.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Instagram: fotos y vídeos",
+          "domains": [
+            "instagram.com"
+          ],
+          "ui": {
+            "inicio": {
+              "gramatica": [
+                "inicio"
+              ],
+              "descripcion": "Publicaciones",
+              "selector": {
+                "desc": [
+                  "Inicio",
+                  "Home"
+                ]
+              }
+            },
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca personas y contenido",
+              "selector": {
+                "desc": [
+                  "Buscar",
+                  "Search"
+                ]
+              }
+            },
+            "perfil": {
+              "gramatica": [
+                "perfil"
+              ],
+              "descripcion": "Tu perfil",
+              "selector": {
+                "desc": [
+                  "Perfil",
+                  "Profile"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                }
+              ]
+            },
+            "loggedIn": {
+              "any": [
+                {
+                  "desc": "Inicio"
+                },
+                {
+                  "desc": "Home"
+                }
+              ]
+            },
+            "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
+          }
+        },
+        "youtube.com": {
+          "name": "YouTube",
+          "gramatica": [
+            "youtube",
+            "you tube"
+          ],
+          "url": "https://m.youtube.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Vídeos de YouTube",
+          "domains": [
+            "youtube.com",
+            "youtu.be"
+          ],
+          "ui": {
+            "buscar": {
+              "gramatica": [
+                "buscar",
+                "lupa"
+              ],
+              "descripcion": "Busca vídeos",
+              "selector": {
+                "desc": [
+                  "Buscar",
+                  "Search"
+                ]
+              }
+            },
+            "inicio": {
+              "gramatica": [
+                "inicio"
+              ],
+              "descripcion": "Vídeos recomendados",
+              "selector": {
+                "text": [
+                  "Inicio",
+                  "Home"
+                ]
+              }
+            },
+            "suscripciones": {
+              "gramatica": [
+                "suscripciones"
+              ],
+              "descripcion": "Canales a los que sigues",
+              "selector": {
+                "text": [
+                  "Suscripciones",
+                  "Subscriptions"
+                ]
+              }
+            },
+            "pausa": {
+              "gramatica": [
+                "pausa",
+                "reproducir"
+              ],
+              "descripcion": "Pausa o reanuda el vídeo",
+              "selector": {
+                "desc": [
+                  "Pausar",
+                  "Reproducir",
+                  "Pause",
+                  "Play"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": false,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                }
+              ]
+            },
+            "hint": "Puedes ver vídeos sin iniciar sesión."
+          }
+        },
+        "facebook.com": {
+          "name": "Facebook",
+          "gramatica": [
+            "facebook",
+            "face book"
+          ],
+          "url": "https://m.facebook.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Facebook",
+          "domains": [
+            "facebook.com",
+            "fb.com"
+          ],
+          "ui": {
+            "inicio": {
+              "gramatica": [
+                "inicio"
+              ],
+              "descripcion": "Novedades",
+              "selector": {
+                "desc": [
+                  "Inicio",
+                  "Home"
+                ]
+              }
+            },
+            "amigos": {
+              "gramatica": [
+                "amigos"
+              ],
+              "descripcion": "Tus amigos",
+              "selector": {
+                "desc": [
+                  "Amigos",
+                  "Friends"
+                ]
+              }
+            },
+            "notificaciones": {
+              "gramatica": [
+                "notificaciones"
+              ],
+              "descripcion": "Avisos",
+              "selector": {
+                "desc": [
+                  "Notificaciones",
+                  "Notifications"
+                ]
+              }
+            },
+            "menu": {
+              "gramatica": [
+                "menú"
+              ],
+              "descripcion": "Más opciones",
+              "selector": {
+                "desc": [
+                  "Menú",
+                  "Menu"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                },
+                {
+                  "text": "Crear cuenta nueva"
+                }
+              ]
+            },
+            "loggedIn": {
+              "any": [
+                {
+                  "desc": "Inicio"
+                },
+                {
+                  "desc": "Home"
+                }
+              ]
+            },
+            "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
+          }
+        },
+        "amazon.es": {
+          "name": "Amazon",
+          "gramatica": [
+            "amazon"
+          ],
+          "url": "https://www.amazon.es",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Tienda Amazon",
+          "domains": [
+            "amazon.es",
+            "amazon.com"
+          ],
+          "ui": {
+            "buscador": {
+              "gramatica": [
+                "buscador",
+                "buscar producto"
+              ],
+              "descripcion": "Busca productos",
+              "selector": {
+                "desc": [
+                  "Buscar Amazon.es",
+                  "Search Amazon",
+                  "Buscar"
+                ],
+                "text": [
+                  "Buscar Amazon.es",
+                  "Search Amazon"
+                ]
+              }
+            },
+            "carrito": {
+              "gramatica": [
+                "carrito",
+                "cesta"
+              ],
+              "descripcion": "Tu carrito de la compra",
+              "selector": {
+                "desc": [
+                  "Carrito",
+                  "Cart"
+                ],
+                "text": [
+                  "Carrito",
+                  "Cart"
+                ]
+              }
+            },
+            "cuenta": {
+              "gramatica": [
+                "mi cuenta",
+                "cuenta"
+              ],
+              "descripcion": "Tu cuenta y pedidos",
+              "selector": {
+                "text": [
+                  "Cuenta y listas",
+                  "Tu cuenta",
+                  "Account"
+                ]
+              }
+            },
+            "iniciarSesion": {
+              "gramatica": [
+                "iniciar sesión"
+              ],
+              "descripcion": "Entrar con tu cuenta",
+              "selector": {
+                "text": [
+                  "Iniciar sesión",
+                  "Log in",
+                  "Sign in",
+                  "Entrar"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": false,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Identifícate"
+                },
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Sign in"
+                }
+              ]
+            },
+            "hint": "Puedes mirar productos sin cuenta, pero para comprar hay que iniciar sesión."
+          }
+        },
+        "chatgpt.com": {
+          "name": "ChatGPT",
+          "gramatica": [
+            "chat gpt",
+            "chatgpt"
+          ],
+          "url": "https://chatgpt.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Asistente de inteligencia artificial ChatGPT",
+          "domains": [
+            "chatgpt.com",
+            "chat.openai.com"
+          ],
+          "ui": {
+            "campoMensaje": {
+              "gramatica": [
+                "campo de mensaje",
+                "escribir pregunta",
+                "caja de texto"
+              ],
+              "descripcion": "Donde se escribe la pregunta",
+              "selector": {
+                "desc": [
+                  "Pregunta lo que quieras",
+                  "Message ChatGPT",
+                  "Ask anything"
+                ],
+                "text": [
+                  "Pregunta lo que quieras",
+                  "Message ChatGPT",
+                  "Ask anything"
+                ]
+              }
+            },
+            "enviar": {
+              "gramatica": [
+                "enviar",
+                "botón enviar"
+              ],
+              "descripcion": "Envía la pregunta",
+              "selector": {
+                "desc": [
+                  "Enviar",
+                  "Send"
+                ]
+              }
+            },
+            "nuevoChat": {
+              "gramatica": [
+                "nuevo chat"
+              ],
+              "descripcion": "Empieza una conversación nueva",
+              "selector": {
+                "desc": [
+                  "Nuevo chat",
+                  "New chat"
+                ],
+                "text": [
+                  "Nuevo chat",
+                  "New chat"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                },
+                {
+                  "text": "Registrarse"
+                },
+                {
+                  "text": "Sign up"
+                }
+              ]
+            },
+            "loggedIn": {
+              "any": [
+                {
+                  "text": "Nuevo chat"
+                },
+                {
+                  "text": "New chat"
+                }
+              ]
+            },
+            "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
+          }
+        },
+        "web.whatsapp.com": {
+          "name": "WhatsApp Web",
+          "gramatica": [
+            "whatsapp web",
+            "whatsapp"
+          ],
+          "url": "https://web.whatsapp.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "WhatsApp en el navegador",
+          "domains": [
+            "web.whatsapp.com",
+            "whatsapp.com"
+          ],
+          "ui": {
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca un chat",
+              "selector": {
+                "desc": [
+                  "Buscar",
+                  "Search"
+                ],
+                "text": [
+                  "Buscar",
+                  "Search"
+                ]
+              }
+            },
+            "nuevoChat": {
+              "gramatica": [
+                "nuevo chat"
+              ],
+              "descripcion": "Empieza una conversación",
+              "selector": {
+                "desc": [
+                  "Nuevo chat",
+                  "New chat"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Escanea el código QR"
+                },
+                {
+                  "text": "Scan the QR code"
+                },
+                {
+                  "text": "Usar WhatsApp en tu computadora"
+                },
+                {
+                  "text": "Use WhatsApp on your computer"
+                }
+              ]
+            },
+            "loggedIn": {
+              "any": [
+                {
+                  "text": "Chats"
+                }
+              ]
+            },
+            "hint": "Hay que vincular el móvil escaneando un código QR desde otro dispositivo. Pide ayuda a otra persona."
+          }
+        },
+        "deepseek.com": {
+          "name": "DeepSeek",
+          "gramatica": [
+            "deepseek",
+            "deep seek"
+          ],
+          "url": "https://chat.deepseek.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Asistente de inteligencia artificial DeepSeek",
+          "domains": [
+            "deepseek.com",
+            "chat.deepseek.com"
+          ],
+          "ui": {
+            "campoMensaje": {
+              "gramatica": [
+                "campo de mensaje",
+                "escribir pregunta",
+                "caja de texto"
+              ],
+              "descripcion": "Donde se escribe la pregunta",
+              "selector": {
+                "text": [
+                  "Enviar un mensaje a DeepSeek",
+                  "Message DeepSeek"
+                ],
+                "desc": [
+                  "Enviar un mensaje a DeepSeek",
+                  "Message DeepSeek"
+                ]
+              }
+            },
+            "nuevoChat": {
+              "gramatica": [
+                "nuevo chat"
+              ],
+              "descripcion": "Empieza una conversación nueva",
+              "selector": {
+                "text": [
+                  "Nuevo chat",
+                  "New chat"
+                ]
+              }
+            },
+            "pensar": {
+              "gramatica": [
+                "pensar",
+                "deep think"
+              ],
+              "descripcion": "Activa el razonamiento profundo",
+              "selector": {
+                "text": [
+                  "DeepThink"
+                ]
+              }
+            },
+            "buscarWeb": {
+              "gramatica": [
+                "buscar en internet"
+              ],
+              "descripcion": "Activa la búsqueda en internet",
+              "selector": {
+                "text": [
+                  "Search",
+                  "Buscar"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                },
+                {
+                  "text": "Registrarse"
+                },
+                {
+                  "text": "Sign up"
+                }
+              ]
+            },
+            "loggedIn": {
+              "any": [
+                {
+                  "text": "Nuevo chat"
+                },
+                {
+                  "text": "New chat"
+                }
+              ]
+            },
+            "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
+          }
+        },
+        "wikipedia.org": {
+          "name": "Wikipedia",
+          "gramatica": [
+            "wikipedia",
+            "la wikipedia"
+          ],
+          "url": "https://es.wikipedia.org",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Enciclopedia libre",
+          "domains": [
+            "wikipedia.org",
+            "wikipedia.com"
+          ],
+          "ui": {
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca un artículo",
+              "selector": {
+                "desc": [
+                  "Buscar en Wikipedia",
+                  "Search Wikipedia",
+                  "Buscar"
+                ],
+                "text": [
+                  "Buscar en Wikipedia",
+                  "Search Wikipedia"
+                ]
+              }
+            },
+            "menu": {
+              "gramatica": [
+                "menú"
+              ],
+              "descripcion": "Menú principal",
+              "selector": {
+                "desc": [
+                  "Menú principal",
+                  "Main menu",
+                  "Abrir menú principal"
+                ]
+              }
+            },
+            "idiomas": {
+              "gramatica": [
+                "idiomas",
+                "cambiar idioma"
+              ],
+              "descripcion": "Cambia el idioma del artículo",
+              "selector": {
+                "text": [
+                  "Idiomas",
+                  "Languages"
+                ]
+              }
+            }
+          }
+        },
+        "github.com": {
+          "name": "GitHub",
+          "gramatica": [
+            "github",
+            "git hub"
+          ],
+          "url": "https://github.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Código y proyectos",
+          "domains": [
+            "github.com"
+          ],
+          "ui": {
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca repositorios y código",
+              "selector": {
+                "desc": [
+                  "Buscar o saltar a…",
+                  "Search or jump to…",
+                  "Buscar"
+                ],
+                "text": [
+                  "Search or jump to…",
+                  "Buscar o saltar a…"
+                ]
+              }
+            },
+            "menu": {
+              "gramatica": [
+                "menú"
+              ],
+              "descripcion": "Abre el menú",
+              "selector": {
+                "desc": [
+                  "Abrir menú",
+                  "Toggle navigation",
+                  "Menú"
+                ]
+              }
+            },
+            "issues": {
+              "gramatica": [
+                "issues",
+                "incidencias"
+              ],
+              "descripcion": "Incidencias del repositorio",
+              "selector": {
+                "text": [
+                  "Issues"
+                ]
+              }
+            },
+            "pullRequests": {
+              "gramatica": [
+                "pull requests",
+                "solicitudes de cambios"
+              ],
+              "descripcion": "Propuestas de cambios",
+              "selector": {
+                "text": [
+                  "Pull requests"
+                ]
+              }
+            },
+            "iniciarSesion": {
+              "gramatica": [
+                "iniciar sesión"
+              ],
+              "descripcion": "Entrar con tu cuenta",
+              "selector": {
+                "text": [
+                  "Sign in",
+                  "Iniciar sesión"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": false,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Iniciar sesión"
+                }
+              ]
+            },
+            "hint": "Puedes mirar proyectos públicos sin iniciar sesión."
+          }
+        },
+        "mail.google.com": {
+          "name": "Gmail",
+          "gramatica": [
+            "gmail",
+            "correo",
+            "correo de google"
+          ],
+          "url": "https://mail.google.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Correo de Gmail",
+          "domains": [
+            "mail.google.com",
+            "gmail.com"
+          ],
+          "ui": {
+            "redactar": {
+              "gramatica": [
+                "redactar",
+                "nuevo correo",
+                "escribir correo"
+              ],
+              "descripcion": "Escribe un correo nuevo",
+              "selector": {
+                "text": [
+                  "Redactar",
+                  "Compose"
+                ],
+                "desc": [
+                  "Redactar",
+                  "Compose"
+                ]
+              }
+            },
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca en tu correo",
+              "selector": {
+                "desc": [
+                  "Buscar en el correo",
+                  "Search mail"
+                ],
+                "text": [
+                  "Buscar en el correo",
+                  "Search mail"
+                ]
+              }
+            },
+            "recibidos": {
+              "gramatica": [
+                "recibidos",
+                "bandeja de entrada"
+              ],
+              "descripcion": "Correos recibidos",
+              "selector": {
+                "text": [
+                  "Recibidos",
+                  "Inbox"
+                ]
+              }
+            },
+            "enviados": {
+              "gramatica": [
+                "enviados"
+              ],
+              "descripcion": "Correos enviados",
+              "selector": {
+                "text": [
+                  "Enviados",
+                  "Sent"
+                ]
+              }
+            },
+            "menu": {
+              "gramatica": [
+                "menú",
+                "carpetas"
+              ],
+              "descripcion": "Abre las carpetas",
+              "selector": {
+                "desc": [
+                  "Menú principal",
+                  "Main menu"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": true,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Log in"
+                },
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Entrar"
+                },
+                {
+                  "text": "Elige una cuenta"
+                },
+                {
+                  "text": "Choose an account"
+                }
+              ]
+            },
+            "loggedIn": {
+              "any": [
+                {
+                  "text": "Recibidos"
+                },
+                {
+                  "text": "Inbox"
+                },
+                {
+                  "text": "Redactar"
+                },
+                {
+                  "text": "Compose"
+                }
+              ]
+            },
+            "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez. Después suele mantenerse."
+          }
+        },
+        "gist.github.com": {
+          "name": "Gist",
+          "gramatica": [
+            "gist",
+            "gist de github"
+          ],
+          "url": "https://gist.github.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Fragmentos de código de GitHub",
+          "domains": [
+            "gist.github.com"
+          ],
+          "ui": {
+            "descubrir": {
+              "gramatica": [
+                "descubrir",
+                "todos los gists"
+              ],
+              "descripcion": "Gists públicos",
+              "selector": {
+                "text": [
+                  "Discover",
+                  "Descubrir",
+                  "All gists"
+                ]
+              }
+            },
+            "nuevo": {
+              "gramatica": [
+                "nuevo gist"
+              ],
+              "descripcion": "Crea un gist",
+              "selector": {
+                "text": [
+                  "New gist",
+                  "Nuevo gist"
+                ],
+                "desc": [
+                  "New gist",
+                  "Nuevo gist"
+                ]
+              }
+            },
+            "iniciarSesion": {
+              "gramatica": [
+                "iniciar sesión"
+              ],
+              "descripcion": "Entrar con tu cuenta",
+              "selector": {
+                "text": [
+                  "Sign in",
+                  "Iniciar sesión"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": false,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Sign in"
+                },
+                {
+                  "text": "Iniciar sesión"
+                }
+              ]
+            },
+            "hint": "Para crear gists hay que iniciar sesión."
+          }
+        },
+        "foro.elhacker.net": {
+          "name": "Foro elhacker.net",
+          "gramatica": [
+            "foro el hacker",
+            "elhacker",
+            "foro elhacker"
+          ],
+          "url": "https://foro.elhacker.net",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Foro de informática y seguridad",
+          "domains": [
+            "foro.elhacker.net",
+            "elhacker.net"
+          ],
+          "ui": {
+            "inicio": {
+              "gramatica": [
+                "inicio"
+              ],
+              "descripcion": "Portada del foro",
+              "selector": {
+                "text": [
+                  "Inicio",
+                  "Home"
+                ]
+              }
+            },
+            "buscar": {
+              "gramatica": [
+                "buscar"
+              ],
+              "descripcion": "Busca en el foro",
+              "selector": {
+                "text": [
+                  "Buscar",
+                  "Search"
+                ],
+                "desc": [
+                  "Buscar",
+                  "Search"
+                ]
+              }
+            },
+            "recientes": {
+              "gramatica": [
+                "mensajes recientes",
+                "últimos mensajes"
+              ],
+              "descripcion": "Últimos mensajes",
+              "selector": {
+                "text": [
+                  "Mensajes recientes",
+                  "Últimos mensajes",
+                  "Unread posts"
+                ]
+              }
+            },
+            "entrar": {
+              "gramatica": [
+                "entrar",
+                "iniciar sesión"
+              ],
+              "descripcion": "Entrar con tu usuario",
+              "selector": {
+                "text": [
+                  "Entrar",
+                  "Iniciar sesión",
+                  "Login"
+                ]
+              }
+            }
+          },
+          "login": {
+            "required": false,
+            "loggedOut": {
+              "any": [
+                {
+                  "text": "Entrar"
+                },
+                {
+                  "text": "Iniciar sesión"
+                },
+                {
+                  "text": "Login"
+                }
+              ]
+            },
+            "hint": "Para escribir en el foro hay que entrar con tu usuario."
+          }
+        },
+        "translate.google.com": {
+          "name": "Google Traductor",
+          "gramatica": [
+            "traductor",
+            "google traductor",
+            "traducir"
+          ],
+          "url": "https://translate.google.com",
+          "version": "2026-11-02",
+          "fecha": "2026-11-02",
+          "description": "Traductor de Google",
+          "domains": [
+            "translate.google.com",
+            "translate.google.es"
+          ],
+          "ui": {
+            "textoOrigen": {
+              "gramatica": [
+                "texto de origen",
+                "escribir texto"
+              ],
+              "descripcion": "Donde se escribe lo que quieres traducir",
+              "selector": {
+                "desc": [
+                  "Texto de origen",
+                  "Source text"
+                ],
+                "text": [
+                  "Introduce texto",
+                  "Enter text"
+                ]
+              }
+            },
+            "idiomaOrigen": {
+              "gramatica": [
+                "idioma de origen"
+              ],
+              "descripcion": "Idioma del texto original",
+              "selector": {
+                "desc": [
+                  "Idioma de origen",
+                  "Source language"
+                ]
+              }
+            },
+            "idiomaDestino": {
+              "gramatica": [
+                "idioma de destino"
+              ],
+              "descripcion": "Idioma al que se traduce",
+              "selector": {
+                "desc": [
+                  "Idioma de destino",
+                  "Target language"
+                ]
+              }
+            },
+            "intercambiar": {
+              "gramatica": [
+                "intercambiar idiomas"
+              ],
+              "descripcion": "Cambia origen y destino",
+              "selector": {
+                "desc": [
+                  "Intercambiar idiomas",
+                  "Swap languages"
+                ]
+              }
             }
           }
         }
       }
     }
+  },
+  "_guia": {
+    "1_estructura": "devices > (default | fabricante | modelo) > apps / webs. Lo específico PARCHEA a lo general (solo pones lo que cambia; null borra).",
+    "2_app": "apps.<clave>: canonical-name/packages (paquetes), name (nombre hablado), groups (cursores reutilizables), ui (cursores de todas las pantallas), screens (pantallas), versions (ajustes por versión).",
+    "3_web": "webs.<dominio>: domains (dominios que identifican la web), url (inicio), version/fecha (día en que se escribió), name, gramatica (cómo se nombra), login, ui, screens.",
+    "4_pantalla": "screens.<clave>: default, gramatica, descripcion, include (grupos), detect {all, any, none, priority}, ui. Cada pantalla tiene sus propios cursores.",
+    "5_cursor": "gramatica (frases), descripcion, descripcionLarga, xPct/yPct (porcentaje) o x/y (píxeles), selector {id,text,desc} (cada uno puede ser una lista de alternativas), action (tap|longpress|doubletap|swipe|scroll), scroll {mode:auto|none,maxSteps,resetFirst}.",
+    "6_selector": "Si hay selector se busca el elemento real en pantalla; si no está a la vista, se desplaza la lista hasta encontrarlo (scroll auto). Si no aparece, se usan las coordenadas.",
+    "7_login": "login {required, loggedIn{any|all|none}, loggedOut{...}, hint}. Vocalia avisa de si hay sesión iniciada al entrar en el modo pantalla y con 'he iniciado sesión'.",
+    "8_calibrar": "'lee todo' + 'elemento N, detalle' dan coordenadas; 'qué pantalla es' + el log muestran textos/ids visibles para escribir reglas detect y selectores."
   }
 }

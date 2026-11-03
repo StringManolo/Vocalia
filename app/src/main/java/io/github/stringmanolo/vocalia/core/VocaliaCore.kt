@@ -47,6 +47,17 @@ class VocaliaCore(
             "busca elemento con", "busca el elemento", "busca el texto", "busca texto",
             "elemento", "con", "texto", "el", "y",
             "cursor", "cursores", "lee cursores", "lista de cursores", "qué cursores hay",
+            "dónde estoy", "qué hay en pantalla", "qué hay aquí", "qué estoy viendo",
+            "en qué web estoy", "en qué aplicación estoy", "resumen de la pantalla",
+            "lee los textos", "lee textos", "qué textos hay", "lee los botones", "lee botones",
+            "qué botones hay", "qué puedo pulsar", "lee los campos", "lee campos", "qué campos hay",
+            "dónde puedo escribir", "más elementos", "siguiente página", "sigue la lista",
+            "he iniciado sesión", "estoy conectado", "estado de la sesión", "tengo la sesión iniciada",
+            "qué webs conoces", "lista de webs", "abre la web de", "abre la web", "ve a la web de",
+            "ir a la web de", "navega a", "entra en la web de",
+            "ayuda aplicaciones", "ayuda pantalla", "ayuda lectura", "ayuda cursores", "ayuda webs",
+            "ayuda sesión", "ayuda voz", "ayuda escucha", "ayuda escritura", "ayuda completa",
+            "salir del modo pantalla", "sal del modo pantalla", "salir de la pantalla",
             "recarga configuración", "recarga la configuración", "recarga configuracion",
             "estado de la configuración", "información de la configuración",
             "pulsa en", "toca en", "toca", "en", "de", "la", "lista",
@@ -177,6 +188,9 @@ class VocaliaCore(
     // Ciclo de vida
     // ----------------------------------------------------------------
 
+    /** Se invoca cuando Vosk ya escucha (para poder dar la bienvenida). */
+    var onVoskReady: (() -> Unit)? = null
+
     fun start(grammar: String) {
         log("start")
         fullGrammar = grammar
@@ -186,6 +200,27 @@ class VocaliaCore(
             state = State.IDLE
             voskEngine.startListening()
             log("Vosk escuchando (IDLE)")
+            onVoskReady?.invoke()
+        }
+    }
+
+    /**
+     * Bienvenida al abrir la app: con la voz por defecto (espeak) avisa de que carga la voz
+     * inteligente; si carga, la usa; si no, sigue con la de por defecto. Después explica
+     * cómo usar Vocalia. Es un TTS bloqueante: Vosk no escucha mientras habla (anti-eco).
+     */
+    fun welcome() {
+        mainHandler.post {
+            log("welcome")
+            if (state != State.IDLE) { log("welcome omitido (state=$state)"); return@post }
+            speakBlocking(HelpTopics.WELCOME_LOADING) {
+                ttsManager.setEngineAsync(TtsManager.EngineMode.SHERPA) { ok, msg ->
+                    mainHandler.post {
+                        log("welcome: voz inteligente ok=$ok msg=$msg")
+                        speakBlocking(HelpTopics.WELCOME_GUIDE) { enterIdle() }
+                    }
+                }
+            }
         }
     }
 
@@ -277,7 +312,7 @@ class VocaliaCore(
         uiTimeoutRunnable = Runnable {
             if (state == State.UI_NAVIGATION) {
                 log("UI_NAVIGATION timeout por inactividad")
-                speakAndReturn("saliendo del modo usar por inactividad") { leaveUiMode() }
+                speakAndReturn("Salgo del modo pantalla por inactividad. Para volver, di: vocalia, modo pantalla.") { leaveUiMode() }
             }
         }.also { mainHandler.postDelayed(it, uiNavigationTimeoutMs) }
     }
@@ -388,6 +423,16 @@ class VocaliaCore(
      * y devuelve el texto que produce al hilo del TTS.
      * Si el servicio no está disponible, sale del modo usar.
      */
+    /** Como [a11yCommand], pero al terminar actualiza las palabras en caliente de la gramática. */
+    private fun a11yCommandVocab(
+        refreshAfter: Boolean = false,
+        action: (VocaliaAccessibilityService) -> String
+    ) = a11yCommand(refreshAfter) { svc ->
+        val r = action(svc)
+        dynamicUiWords = svc.getVocabulary()
+        r
+    }
+
     private fun a11yCommand(
         refreshAfter: Boolean = false,
         action: (VocaliaAccessibilityService) -> String
@@ -396,7 +441,7 @@ class VocaliaCore(
             val svc = VocaliaAccessibilityService.instance
             if (svc == null) {
                 log("a11y: servicio no disponible")
-                speakAndReturn("servicio de accesibilidad no disponible, actívalo en ajustes") {
+                speakAndReturn("Hay que activar Vocalia en los ajustes de accesibilidad del móvil. Pide ayuda a otra persona para hacerlo una vez.") {
                     leaveUiMode()
                 }
                 return@post
@@ -574,14 +619,18 @@ class VocaliaCore(
                 }
             }
             CommandResult.Help -> {
-                log("Help solicitado (bloqueante, Vosk detenido) returnTo=$returnTo")
-                speakBlocking(if (returnTo == State.UI_NAVIGATION) UI_HELP_TEXT else HELP_TEXT) {
+                log("Help solicitado returnTo=$returnTo")
+                speakBlocking(if (returnTo == State.UI_NAVIGATION) HelpTopics.MENU_PANTALLA else HelpTopics.MENU_GENERAL) {
                     afterExecution()
                 }
             }
+            is CommandResult.HelpTopic -> {
+                log("HelpTopic ${parsed.topic}")
+                speakBlocking(HelpTopics.topic(parsed.topic) ?: HelpTopics.MENU_GENERAL) { afterExecution() }
+            }
             CommandResult.UiHelp -> {
                 log("UiHelp solicitado")
-                speakBlocking(UI_HELP_TEXT) { afterExecution() }
+                speakBlocking(HelpTopics.topic("pantalla")!!) { afterExecution() }
             }
             CommandResult.ListApps -> {
                 val all = appLauncher.getAllAppsForTTS()
@@ -667,22 +716,35 @@ class VocaliaCore(
                 val svc = VocaliaAccessibilityService.instance
                 if (svc == null) {
                     log("EnterUiMode: accesibilidad no disponible")
-                    speakAndReturn("servicio de accesibilidad no disponible, actívalo en ajustes") {
+                    speakAndReturn("Para usar el modo pantalla hay que activar Vocalia en los ajustes de accesibilidad del móvil. Pide ayuda a otra persona para hacerlo una vez.") {
                         afterExecution()
                     }
                 } else {
-                    log("EnterUiMode: activando modo usar")
-                    speakAndReturn("modo usar activado") { enterUiNavigation(refreshList = true) }
+                    log("EnterUiMode: activando modo pantalla")
+                    mainHandler.post {
+                        val brief = try { svc.whereBrief() } catch (t: Throwable) { "" }
+                        speakAndReturn("Modo pantalla activado. $brief Para saber qué puedes hacer, di: vocalia, ayuda.") {
+                            enterUiNavigation(refreshList = true)
+                        }
+                    }
                 }
             }
             CommandResult.ExitUiMode -> {
                 log("ExitUiMode")
-                speakAndReturn("modo usar desactivado") { leaveUiMode() }
+                speakAndReturn("Has salido del modo pantalla.") { leaveUiMode() }
             }
             CommandResult.UiNext     -> a11yCommand { it.nextNode() }
             CommandResult.UiPrevious -> a11yCommand { it.previousNode() }
             CommandResult.UiRead     -> a11yCommand { it.readCurrentNode() }
             CommandResult.UiDetail   -> a11yCommand { it.describeCurrentNodeDetailed() }
+            CommandResult.UiWhere -> a11yCommandVocab { it.whereAmI() }
+            CommandResult.UiReadTexts -> a11yCommandVocab { it.readTexts() }
+            CommandResult.UiReadButtons -> a11yCommandVocab { it.readButtons() }
+            CommandResult.UiReadFields -> a11yCommandVocab { it.readFields() }
+            CommandResult.UiReadMore -> a11yCommand { it.readMoreElements() }
+            CommandResult.UiLoginInfo -> a11yCommand { it.loginInfo() }
+            CommandResult.UiListWebs -> a11yCommand { it.listWebs() }
+            is CommandResult.UiOpenWeb -> a11yCommandVocab(refreshAfter = true) { it.openWeb(parsed.name) }
             is CommandResult.UiCursor -> a11yCommand { it.cursorTo(parsed.phrase) }
             is CommandResult.UiPressPhrase -> a11yCommand(refreshAfter = true) { it.pressByPhrase(parsed.phrase) }
             CommandResult.UiListCursors -> a11yCommand { it.listCursors() }

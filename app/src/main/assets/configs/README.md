@@ -139,3 +139,86 @@ Un elemento sin coordenadas ni selector es **solo informativo**: se puede leer p
 El lector es el de Android y es **tolerante**: admite comentarios (`//`, `#`, `/* */`),
 claves sin comillas, comillas simples y valores como `v13.1.0` sin comillas.
 Los campos que empiezan por `_` (como `_nota`) se ignoran.
+
+---
+
+## Novedades de la versión 3 del formato
+
+### Webs (`webs`)
+Además de `apps`, cada sección de dispositivo puede tener `webs`. Una web se identifica por su
+**dominio**, que Vocalia lee de la barra de direcciones del navegador (Chrome, Firefox, Brave, Edge, Samsung…).
+
+```json
+"webs": {
+  "wikipedia.org": {
+    "name": "Wikipedia",
+    "gramatica": ["wikipedia", "la wikipedia"],
+    "url": "https://es.wikipedia.org",
+    "version": "2026-11-02",
+    "description": "Enciclopedia libre",
+    "domains": ["wikipedia.org", "wikipedia.com"],
+    "login": { ... },
+    "ui": { ... },
+    "screens": { ... }
+  }
+}
+```
+
+- `domains`: sirven también los subdominios (`es.wikipedia.org` coincide con `wikipedia.org`).
+- `version` / `fecha`: las webs no tienen versión pública; se usa **el día en que se escribió** la configuración.
+- `url` y `gramatica`: permiten `vocalia, abre la web de wikipedia`.
+- Los cursores de la web se suman a los del navegador (barra de direcciones, pestañas…). Si el mismo nombre existe en ambos, gana el de la web.
+- Mejor **selectores** que coordenadas: el diseño de una web cambia según el tamaño de pantalla.
+
+### Selectores con alternativas
+`text`, `desc` e `id` aceptan una lista, para varios idiomas o variantes:
+
+```json
+"selector": { "text": ["Configuración", "Settings"], "id": "menu_button" }
+```
+
+### Desplazamiento automático
+Si un cursor tiene `selector` y el elemento **no está a la vista** (por ejemplo, "Configuración" al
+final del menú de Chrome), Vocalia lo busca desplazando la lista hacia abajo hasta encontrarlo.
+
+```json
+"scroll": { "mode": "auto", "maxSteps": 8, "resetFirst": false }
+```
+
+- `mode`: `auto` (por defecto) o `none`.
+- `maxSteps`: pasos máximos (1–30). Cada paso espera unos 0,35 s.
+- `resetFirst`: `true` = volver antes al principio de la lista, para que el recorrido sea siempre el mismo.
+
+### Acción `scroll`
+Un cursor puede ser un desplazamiento en sí mismo:
+
+```json
+"bajarMenu": { "gramatica": ["bajar menú"], "action": "scroll", "direction": "down", "times": 2 }
+```
+
+`direction`: `down` o `up`. `times`: cuántas veces. También sirve `swipe` entre dos puntos.
+
+### Sesión iniciada (`login`)
+Para webs y apps que no funcionan sin cuenta:
+
+```json
+"login": {
+  "required": true,
+  "loggedIn":  { "any": [ { "text": "Recibidos" }, { "text": "Inbox" } ] },
+  "loggedOut": { "any": [ { "text": "Iniciar sesión" }, { "text": "Sign in" } ] },
+  "hint": "Pide ayuda a una persona de confianza para iniciar sesión una vez."
+}
+```
+
+- `loggedIn` / `loggedOut` usan las mismas reglas que `detect` (`all`, `any`, `none`).
+- Si se cumple `loggedIn` → "Tienes la sesión iniciada". Si no, y se cumple `loggedOut` → "No has iniciado sesión…" más el `hint`.
+- `required: true` añade "Esta web no funciona sin iniciar sesión".
+- Se dice al entrar en el modo pantalla y con `vocalia, he iniciado sesión`.
+
+### Ficheros
+Solo se leen como configuración de apps y webs los ficheros `vocalia-*-apps-config.json`.
+`vocalia-grammar-profiles.json` es otra cosa: los perfiles de gramática del futuro modo dictado.
+
+## Comandos nuevos (modo pantalla)
+`dónde estoy`, `lee los textos`, `lee los botones`, `lee los campos`, `más elementos`,
+`he iniciado sesión`, `qué webs conoces`, `abre la web de …`, `ayuda <tema>`.

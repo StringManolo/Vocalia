@@ -38,11 +38,12 @@ class MainActivity : AppCompatActivity() {
         requestRecordAudioIfNeeded()
         requestOverlayIfNeeded()
 
+        // El servicio arranca solo al abrir la app (con bienvenida). Solo se detiene si el
+        // usuario pulsa "Detener". Sin permiso de micrófono se espera a que lo conceda.
+        if (hasAudioPermission()) startVocaliaService()
+
         findViewById<Button>(R.id.startButton).setOnClickListener {
-            val intent = Intent(this, VocaliaService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-            else startService(intent)
-            statusText.postDelayed({ updateStatus() }, 300)
+            startVocaliaService()
         }
         findViewById<Button>(R.id.stopButton).setOnClickListener {
             stopService(Intent(this, VocaliaService::class.java))
@@ -53,6 +54,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateStatus()
+    }
+
+    private fun hasAudioPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    private fun startVocaliaService() {
+        val intent = Intent(this, VocaliaService::class.java).putExtra(VocaliaService.EXTRA_WELCOME, true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+        else startService(intent)
+        statusText.postDelayed({ updateStatus() }, 300)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_RECORD_AUDIO && grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED && !VocaliaService.isRunning) {
+            startVocaliaService()
+        }
     }
 
     override fun onResume() {

@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
@@ -42,7 +44,21 @@ import io.github.stringmanolo.vocalia.util.InternalDebug
 class VocaliaAccessibilityService : AccessibilityService() {
 
     companion object {
-        private const val MAX_NODES = 120
+        private const val MAX_NODES = 200
+        private const val READ_PAGE = 8
+
+        /** Navegadores conocidos y los ids (sin el prefijo del paquete) de su barra de direcciones. */
+        private val BROWSER_URL_IDS: Map<String, List<String>> = mapOf(
+            "com.android.chrome" to listOf("url_bar"),
+            "com.chrome.beta" to listOf("url_bar"),
+            "com.chrome.dev" to listOf("url_bar"),
+            "com.brave.browser" to listOf("url_bar"),
+            "com.microsoft.emmx" to listOf("url_bar"),
+            "com.opera.browser" to listOf("url_field"),
+            "org.mozilla.firefox" to listOf("mozac_browser_toolbar_url_view", "url_bar_title"),
+            "com.sec.android.app.sbrowser" to listOf("location_bar_edit_text"),
+            "com.duckduckgo.mobile.android" to listOf("omnibarTextInput")
+        )
         private const val MAX_VOCAB = 150
         private const val MAX_CONFIG_PHRASES = 150
 
@@ -68,6 +84,10 @@ class VocaliaAccessibilityService : AccessibilityService() {
     private var activeConfig: AppUiConfig? = null
     /** Pantalla actual de la app (detectada por reglas, o forzada por voz con "pantalla X"). */
     private var currentScreen: UiScreen? = null
+    /** Web abierta en el navegador (si hay configuración para su dominio) y su pantalla. */
+    private var webConfig: AppUiConfig? = null
+    private var webScreen: UiScreen? = null
+    private var webHost: String? = null
     private var forcedScreenKey: String? = null
     /** Clase de la última ventana (actividad) que cambió de estado. */
     @Volatile private var lastWindowClass: String? = null
@@ -142,15 +162,70 @@ class VocaliaAccessibilityService : AccessibilityService() {
                     "${cfg?.installedVersion}, config=${cfg?.configVersion})")
             }
 
-            val els = cfg?.elementsFor(currentScreen).orEmpty()
-            val screenNames = cfg?.screens?.flatMap { it.grammar }.orEmpty()
-            configPhrases = (els.flatMap { it.grammar } + screenNames).distinct().take(MAX_CONFIG_PHRASES)
+            // Web abierta en un navegador: su configuración se suma a la de la app
+            webHost = readBrowserHost()
+            webConfig = AppConfigManager.webFor(webHost)
+            webScreen = webConfig?.let { detectScreen(it) }
+
+            val els = cfg?.elementsFor(currentScreen).orEmpty() + webConfig?.elementsFor(webScreen).orEmpty()
+            val screenNames = cfg?.screens?.flatMap { it.grammar }.orEmpty() +
+                webConfig?.screens?.flatMap { it.grammar }.orEmpty()
+            val webNames = AppConfigManager.allWebs().flatMap { it.phrases }
+            configPhrases = (els.flatMap { it.grammar } + screenNames + webNames)
+                .distinct().take(MAX_CONFIG_PHRASES)
         } catch (t: Throwable) {
             dbg("updateActiveConfig THREW ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 
     private var lastLoggedApp: String? = null
+
+    // ---- Web en el navegador ----
+
+    private fun hostOf(t: String): String? {
+        var u = t.trim().lowercase().removePrefix("https://").removePrefix("http://")
+        u = u.substringBefore('/').substringBefore('?').substringBefore('#').substringBefore(' ')
+        if (u.isEmpty() || !u.contains('.')) return null
+        return u.removePrefix("www.")
+    }
+
+    /** Dominio de la web abierta, leído de la barra de direcciones del navegador (o null). */
+    private fun readBrowserHost(): String? {
+        val pkg = foregroundPackage ?: return null
+        val ids = BROWSER_URL_IDS[pkg] ?: return null
+        val root = rootInActiveWindow ?: return null
+        for (id in ids) {
+            val t = root.findAccessibilityNodeInfosByViewId("$pkg:id/$id")
+                .firstOrNull()?.text?.toString()?.trim()
+            if (!t.isNullOrEmpty()) return hostOf(t)
+        }
+        return null
+    }
+
+    private enum class LoginState { IN, OUT, UNKNOWN }
+
+    private fun evalLogin(cfg: AppUiConfig): LoginState {
+        val rules = cfg.login ?: return LoginState.UNKNOWN
+        val root = rootInActiveWindow ?: return LoginState.UNKNOWN
+        val snap = snapshotTree(root)
+        if (rules.loggedIn != null && scoreScreen(rules.loggedIn, snap) != null) return LoginState.IN
+        if (rules.loggedOut != null && scoreScreen(rules.loggedOut, snap) != null) return LoginState.OUT
+        return LoginState.UNKNOWN
+    }
+
+    /** Frase sobre la sesión, o null si no hay nada relevante que decir. */
+    private fun loginSentence(cfg: AppUiConfig?): String? {
+        val rules = cfg?.login ?: return null
+        val name = cfg.spokenName
+        return when (evalLogin(cfg)) {
+            LoginState.IN -> "Tienes la sesión iniciada en $name."
+            LoginState.OUT -> "No has iniciado sesión en $name." +
+                (if (rules.required) " Esta web no funciona sin iniciar sesión." else "") +
+                (rules.hint?.let { " $it" } ?: "")
+            LoginState.UNKNOWN ->
+                if (rules.required) "No puedo saber si has iniciado sesión en $name, y la necesita." else null
+        }
+    }
 
     // ---- Detección de pantalla ----
 
@@ -357,7 +432,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
         val role = roleOf(node)
         if (node.isEditable && node.isPassword) return "campo de contraseña $n"
         val (rawName, weak) = accessibleName(node)
-        val name = rawName?.let { SpeechText.speakable(it, 80) }
+        val name = rawName?.let { SpeechText.speakable(it, 300) }
         val parts = mutableListOf<String>()
         when {
             name == null -> parts.add("sin nombre")
@@ -366,24 +441,107 @@ class VocaliaAccessibilityService : AccessibilityService() {
         }
         if (node.isEditable) {
             val content = node.text.clean()
-            if (content != null && content != hintOf(node)) parts.add("contiene ${SpeechText.speakable(content, 80)}")
+            if (content != null && content != hintOf(node)) parts.add("contiene ${SpeechText.speakable(content, 400)}")
             else parts.add("vacío")
         }
         parts.addAll(stateOf(node))
         return "$role $n: ${parts.joinToString(", ")}"
     }
 
-    /** "lee todo": numera la interfaz y la lee entera. */
+    // ---- Lectura por páginas ----
+    private var readLines: List<String> = emptyList()
+    private var readPos = 0
+
+    /** Empieza una lectura paginada: [READ_PAGE] líneas cada vez; "más elementos" continúa. */
+    private fun startReading(header: String, lines: List<String>): String {
+        readLines = lines
+        readPos = 0
+        return nextReadPage(header)
+    }
+
+    private fun nextReadPage(header: String?): String {
+        if (readPos >= readLines.size) return "No hay más. Fin de la lista."
+        val end = minOf(readPos + READ_PAGE, readLines.size)
+        val sb = StringBuilder()
+        header?.let { sb.append(it).append(' ') }
+        for (i in readPos until end) sb.append(readLines[i]).append(". ")
+        readPos = end
+        val left = readLines.size - end
+        if (left > 0) sb.append("Quedan $left. Para seguir, di: más elementos.")
+        else sb.append("Fin de la lista.")
+        return sb.toString().trim()
+    }
+
+    /** "más elementos": siguiente página de la última lista leída. */
+    fun readMoreElements(): String = nextReadPage(null)
+
+    /** Ni nombre ni contenido: no se puede decir nada útil de él. */
+    private fun isUnknown(node: AccessibilityNodeInfo): Boolean =
+        !node.isEditable && accessibleName(node).first == null
+
+    /** Número y descripción de cada elemento, agrupando los desconocidos consecutivos. */
+    private fun groupedLines(): List<String> {
+        val lines = mutableListOf<String>()
+        var i = 0
+        while (i < numbered.size) {
+            if (isUnknown(numbered[i])) {
+                var j = i
+                while (j + 1 < numbered.size && isUnknown(numbered[j + 1])) j++
+                lines.add(if (i == j) "Elemento ${i + 1}, sin información"
+                          else "Elementos del ${i + 1} al ${j + 1}, sin información")
+                i = j + 1
+            } else {
+                lines.add(describeNumbered(numbered[i], i + 1))
+                i++
+            }
+        }
+        return lines
+    }
+
+    /**
+     * "lee todo": numera la interfaz y la lee por páginas. Los elementos sin nombre ni
+     * texto se agrupan en la lectura (no en el control: siguen teniendo su número).
+     */
     fun readAllElements(): String {
         buildNumbering()
-        if (numbered.isEmpty()) return "no hay elementos en pantalla"
-        val sb = StringBuilder()
-        sb.append("La interfaz tiene ${numbered.size} elementos")
-        if (truncated) sb.append(", mostrando solo los primeros $MAX_NODES")
-        sb.append(". ")
-        numbered.forEachIndexed { i, n -> sb.append(describeNumbered(n, i + 1)).append(". ") }
-        dbg("readAll -> ${numbered.size} elementos")
-        return sb.toString().trim()
+        if (numbered.isEmpty()) return "No hay elementos en la pantalla"
+        val known = numbered.count { !isUnknown(it) }
+        val head = "La pantalla tiene ${numbered.size} elementos, $known con información." +
+            (if (truncated) " Solo cuento los primeros $MAX_NODES." else "")
+        dbg("readAll -> ${numbered.size} elementos, $known con información")
+        return startReading(head, groupedLines())
+    }
+
+    /** "lee los textos": solo lo que se puede leer, sin botones. */
+    fun readTexts(): String {
+        buildNumbering()
+        val lines = numbered.withIndex().filter { (_, n) ->
+            !n.isEditable && !n.isClickable && n.text.clean() != null
+        }.map { (i, n) -> "Elemento ${i + 1}: ${SpeechText.speakable(n.text.clean()!!, 400)}" }
+        if (lines.isEmpty()) return "No veo textos sueltos en esta pantalla"
+        return startReading("Veo ${lines.size} textos.", lines)
+    }
+
+    /** "lee los botones": lo que se puede pulsar y tiene nombre. */
+    fun readButtons(): String {
+        buildNumbering()
+        val lines = numbered.withIndex().filter { (_, n) ->
+            !n.isEditable && (n.isClickable || n.isCheckable) && !isUnknown(n)
+        }.map { (i, n) -> describeNumbered(n, i + 1) }
+        val unnamed = numbered.count { !it.isEditable && it.isClickable && isUnknown(it) }
+        if (lines.isEmpty()) return "No veo botones con nombre" +
+            (if (unnamed > 0) ", pero hay $unnamed sin etiqueta. Di: lee cursores, o lee todo" else "")
+        return startReading("Veo ${lines.size} botones" +
+            (if (unnamed > 0) " y $unnamed sin etiqueta." else "."), lines)
+    }
+
+    /** "lee los campos": dónde se puede escribir. */
+    fun readFields(): String {
+        buildNumbering()
+        val lines = numbered.withIndex().filter { (_, n) -> n.isEditable }
+            .map { (i, n) -> describeNumbered(n, i + 1) }
+        if (lines.isEmpty()) return "No veo ningún campo donde escribir"
+        return startReading("Veo ${lines.size} campos de texto.", lines)
     }
 
     /**
@@ -542,7 +700,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
      */
     private fun describeNode(node: AccessibilityNodeInfo): String {
         val (rawName, weak) = accessibleName(node)
-        val name = rawName?.let { SpeechText.speakable(it, 100) }
+        val name = rawName?.let { SpeechText.speakable(it, 400) }
         val role = roleOf(node)
 
         if (node.isEditable && node.isPassword) {
@@ -556,7 +714,7 @@ class VocaliaAccessibilityService : AccessibilityService() {
         if (node.isEditable) {
             val content = node.text.clean()
             // Si el texto coincide con la pista, el campo está realmente vacío
-            if (content != null && content != hintOf(node)) parts.add("contiene: ${SpeechText.speakable(content, 140)}")
+            if (content != null && content != hintOf(node)) parts.add("contiene: ${SpeechText.speakable(content, 400)}")
             else parts.add("vacío")
         }
 
@@ -691,17 +849,51 @@ class VocaliaAccessibilityService : AccessibilityService() {
             return if (swipeFrom(el.x!!.toPx(w), el.y!!.toPx(h), direction, w, h)) "desplazado"
             else "no se pudo desplazar, ${gestureHint()}"
         }
-        val node = getCurrentNode() ?: rootInActiveWindow
-        if (node == null) return "no hay ventana activa"
+        return doScroll(direction)
+    }
+
+    private fun doScroll(direction: ScrollDirection): String {
+        val root = rootInActiveWindow ?: return "no hay ventana activa"
         val action = when (direction) {
             ScrollDirection.UP, ScrollDirection.LEFT ->
                 AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
             ScrollDirection.DOWN, ScrollDirection.RIGHT ->
                 AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         }
-        val ok = node.performAction(action)
-        dbg("scroll $direction -> ok=$ok (nodo=${node.className})")
-        return if (ok) "desplazado" else "no se pudo desplazar"
+        // 1) Contenedor desplazable: el del elemento actual (o un ancestro) y, si no, el primero de la ventana
+        val target = findScrollable(getCurrentNode(), root)
+        if (target != null) {
+            val ok = target.performAction(action)
+            dbg("scroll $direction -> ok=$ok (contenedor=${target.className})")
+            if (ok) return "desplazado"
+        }
+        // 2) Respaldo: deslizar con un gesto por el centro de la pantalla
+        val (w, h) = screenSize()
+        val ok = swipeFrom(w / 2f, h / 2f, direction, w, h)
+        dbg("scroll $direction por gesto -> enviado=$ok")
+        return if (ok) "desplazado" else "no se pudo desplazar, ${gestureHint()}"
+    }
+
+    /** Nodo desplazable: [start] o su ancestro más cercano; si no hay, el primero visible de la ventana. */
+    private fun findScrollable(start: AccessibilityNodeInfo?, root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var n = start
+        var depth = 0
+        while (n != null && depth < 12) {
+            if (n.isScrollable) return n
+            n = n.parent
+            depth++
+        }
+        val stack = ArrayDeque<AccessibilityNodeInfo>()
+        stack.addLast(root)
+        var count = 0
+        while (stack.isNotEmpty() && count < 800) {
+            val x = stack.removeLast()
+            count++
+            if (!x.isVisibleToUser) continue
+            if (x.isScrollable) return x
+            for (i in x.childCount - 1 downTo 0) x.getChild(i)?.let { stack.addLast(it) }
+        }
+        return null
     }
 
     fun pasteClipboard(): String {
@@ -839,8 +1031,6 @@ class VocaliaAccessibilityService : AccessibilityService() {
     // Cursores configurados por app
     // ----------------------------------------------------------------
 
-    private fun noConfigMessage(): String =
-        "no hay configuración para esta aplicación" + (foregroundPackage?.let { ", paquete $it" } ?: "")
 
     private fun describeVirtual(el: UiElement): String {
         val sb = StringBuilder(el.displayName)
@@ -869,39 +1059,97 @@ class VocaliaAccessibilityService : AccessibilityService() {
         return sb.toString()
     }
 
-    private fun findByDesc(node: AccessibilityNodeInfo, needle: String, depth: Int): AccessibilityNodeInfo? {
+    private fun sleepMs(ms: Long) { try { Thread.sleep(ms) } catch (_: InterruptedException) {} }
+
+    private fun findByDesc(node: AccessibilityNodeInfo, needle: String, depth: Int, visibleOnly: Boolean): AccessibilityNodeInfo? {
         if (depth > 40) return null
-        if (node.isVisibleToUser &&
+        if ((!visibleOnly || node.isVisibleToUser) &&
             node.contentDescription?.toString()?.lowercase()?.contains(needle) == true) return node
         for (i in 0 until node.childCount) {
             val c = node.getChild(i) ?: continue
-            findByDesc(c, needle, depth + 1)?.let { return it }
+            findByDesc(c, needle, depth + 1, visibleOnly)?.let { return it }
         }
         return null
     }
 
-    private fun findBySelector(el: UiElement): AccessibilityNodeInfo? {
+    private fun findBySelector(el: UiElement, visibleOnly: Boolean = true): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        el.selId?.let { id ->
+        for (id in el.selIds) {
             val full = if (id.contains(":id/")) id else "${foregroundPackage ?: root.packageName}:id/$id"
-            root.findAccessibilityNodeInfosByViewId(full).firstOrNull { it.isVisibleToUser }?.let { return it }
+            root.findAccessibilityNodeInfosByViewId(full)
+                .firstOrNull { !visibleOnly || it.isVisibleToUser }?.let { return it }
         }
-        el.selText?.let { t ->
-            root.findAccessibilityNodeInfosByText(t).firstOrNull { it.isVisibleToUser }?.let { return it }
+        for (t in el.selTexts) {
+            root.findAccessibilityNodeInfosByText(t)
+                .firstOrNull { !visibleOnly || it.isVisibleToUser }?.let { return it }
         }
-        el.selDesc?.let { d -> findByDesc(root, d.lowercase(), 0)?.let { return it } }
+        for (d in el.selDescs) findByDesc(root, d.lowercase(), 0, visibleOnly)?.let { return it }
+        return null
+    }
+
+    /**
+     * Localiza el elemento de un cursor por selector. Si existe pero no está a la vista, pide al
+     * sistema que lo muestre; si no existe y el modo es "auto", se desplaza la lista hacia abajo
+     * hasta encontrarlo (máx. scrollMax pasos), opcionalmente volviendo antes al principio.
+     * Espera brevemente entre pasos (hasta unos 3 s) para que la pantalla se actualice.
+     */
+    private fun findWithScroll(el: UiElement): AccessibilityNodeInfo? {
+        findBySelector(el, true)?.let { return it }
+        findBySelector(el, false)?.let { n ->
+            if (n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)) {
+                sleepMs(400)
+                findBySelector(el, true)?.let { return it }
+            }
+        }
+        if (el.scrollMode == "none") return null
+        val root = rootInActiveWindow ?: return null
+        val sc = findScrollable(null, root) ?: return null
+        if (el.scrollReset) {
+            for (i in 0 until 12) {
+                if (!sc.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) break
+                sleepMs(150)
+            }
+            findBySelector(el, true)?.let { return it }
+        }
+        for (i in 0 until el.scrollMax) {
+            if (!sc.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) break   // llegó al final
+            sleepMs(350)
+            dbg("auto-scroll paso ${i + 1} buscando ${el.displayName}")
+            findBySelector(el, true)?.let { return it }
+            findBySelector(el, false)?.let { n ->
+                if (n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)) {
+                    sleepMs(300)
+                    findBySelector(el, true)?.let { return it }
+                }
+            }
+        }
         return null
     }
 
     /**
      * Ejecuta la acción de un cursor: primero por selector (id/texto/descripción), que es más
-     * robusto a cambios de diseño, y si no se encuentra, por coordenadas.
+     * robusto a cambios de diseño y permite desplazar hasta encontrarlo, y si no se encuentra,
+     * por coordenadas.
      */
     private fun pressElement(el: UiElement): String {
-        forcedScreenKey = null   // pulsar suele cambiar de pantalla: volver a detectarla
+        // Pulsar suele cambiar de pantalla: volver a detectarla. Desplazar no.
+        if (el.action != "swipe" && el.action != "deslizar" && el.action != "scroll" && el.action != "desplazar") {
+            forcedScreenKey = null
+        }
         dbg("pressElement ${el.key} action=${el.action} point=${el.hasPoint} selector=${el.hasSelector}")
+
+        if (el.action == "scroll" || el.action == "desplazar") {
+            val dir = if (el.scrollDir.startsWith("u") || el.scrollDir == "arriba") ScrollDirection.UP else ScrollDirection.DOWN
+            var res = "no se pudo desplazar"
+            for (n in 0 until el.scrollTimes) {
+                res = doScroll(dir)
+                if (n < el.scrollTimes - 1) sleepMs(350)
+            }
+            return res
+        }
+
         if (el.hasSelector) {
-            val node = findBySelector(el)
+            val node = findWithScroll(el)
             if (node != null) {
                 val ok = when (el.action) {
                     "longpress", "mantener" -> longClickNode(node)
@@ -913,7 +1161,10 @@ class VocaliaAccessibilityService : AccessibilityService() {
                 }
                 return if (ok) "pulsado" else "no se pudo pulsar ${el.displayName}"
             }
-            if (!el.hasPoint) return "no encuentro ${el.displayName} en la pantalla"
+            if (!el.hasPoint) {
+                return "no encuentro ${el.displayName} en la pantalla" +
+                    if (el.scrollMode != "none") ", ni desplazándome" else ""
+            }
             dbg("selector sin resultado, se usan coordenadas")
         }
         if (!el.hasPoint) return "${el.displayName} es solo informativo, no se puede pulsar"
@@ -937,54 +1188,74 @@ class VocaliaAccessibilityService : AccessibilityService() {
 
     private fun screenLabel(): String = currentScreen?.displayName ?: "sin pantalla"
 
+    private fun anyConfig(): AppUiConfig? = webConfig ?: activeConfig
+
+    /** Busca un cursor: primero en la web abierta y luego en la app. */
+    private fun findCursors(phrase: String): List<UiElement> {
+        webConfig?.find(phrase, webScreen)?.takeIf { it.isNotEmpty() }?.let { return it }
+        return activeConfig?.find(phrase, currentScreen).orEmpty()
+    }
+
+    private fun cursorsHere(): List<UiElement> =
+        webConfig?.elementsFor(webScreen).orEmpty() + activeConfig?.elementsFor(currentScreen).orEmpty()
+
+    private fun appLabel(pkg: String): String = try {
+        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+    } catch (_: Throwable) { pkg }
+
     /** "cursor primer chat": selecciona el cursor y lo describe. */
     fun cursorTo(phrase: String): String {
         updateActiveConfig()
-        val cfg = activeConfig ?: return noConfigMessage()
-        val found = cfg.find(phrase, currentScreen)
-        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en la pantalla ${screenLabel()}"
+        if (anyConfig() == null) return noConfigMessage()
+        val found = findCursors(phrase)
+        if (found.isEmpty()) return "No hay ningún cursor llamado $phrase en esta pantalla. Di: lee cursores, para oír los que hay."
         virtualElement = found[0]
-        dbg("cursor -> ${found[0].key} (${found.size} coincidencias, pantalla=${currentScreen?.key})")
-        return describeVirtual(found[0]) + if (found.size > 1) ". hay ${found.size} coincidencias" else ""
+        dbg("cursor -> ${found[0].key} (${found.size} coincidencias)")
+        return describeVirtual(found[0]) + if (found.size > 1) ". Hay ${found.size} coincidencias" else ""
     }
 
     /** "pulsa primer chat": selecciona y ejecuta el cursor directamente. */
     fun pressByPhrase(phrase: String): String {
         updateActiveConfig()
-        val cfg = activeConfig ?: return noConfigMessage()
-        val found = cfg.find(phrase, currentScreen)
-        if (found.isEmpty()) return "no hay ningún cursor llamado $phrase en la pantalla ${screenLabel()}"
+        if (anyConfig() == null) return noConfigMessage()
+        val found = findCursors(phrase)
+        if (found.isEmpty()) return "No hay ningún cursor llamado $phrase en esta pantalla. Di: lee cursores, para oír los que hay."
         virtualElement = found[0]
         return pressElement(found[0])
     }
 
-    /** "lee cursores": lista los cursores de la pantalla actual de la app en primer plano. */
+    /** "lee cursores": lista numerada y completa de lo que se puede decir en esta pantalla. */
     fun listCursors(): String {
         updateActiveConfig()
-        val cfg = activeConfig ?: return noConfigMessage()
-        val els = cfg.elementsFor(currentScreen)
-        if (els.isEmpty()) return "la pantalla ${screenLabel()} de ${cfg.appKey} no tiene cursores"
-        val sb = StringBuilder("En ${cfg.appKey}, pantalla ${screenLabel()}, hay ${els.size} cursores. ")
-        els.take(40).forEach { el ->
-            sb.append(el.displayName)
-            if (!el.description.equals(el.displayName, ignoreCase = true)) sb.append(": ").append(el.description)
-            sb.append(". ")
+        if (anyConfig() == null) return noConfigMessage()
+        val els = cursorsHere()
+        if (els.isEmpty()) return "Esta pantalla no tiene cursores preparados. Di: lee todo, para oír lo que hay."
+        val lines = els.mapIndexed { i, el ->
+            val d = if (!el.description.equals(el.displayName, ignoreCase = true)) ", ${el.description}" else ""
+            "${i + 1}, ${el.displayName}$d"
         }
-        if (els.size > 40) sb.append("y ${els.size - 40} más.")
-        return sb.toString().trim()
+        return startReading(
+            "Hay ${els.size} cursores en esta pantalla. Para usar uno di: pulsa, y su nombre. O di: cursor, y su nombre.",
+            lines
+        )
     }
+
+    private fun noConfigMessage(): String =
+        "No tengo información preparada de esta pantalla. Puedes decir: lee todo, para oír lo que hay, " +
+        "o lee los botones."
 
     /** "pantalla ajustes": fuerza la pantalla actual (hasta pulsar algo, volver atrás o cambiar de app). */
     fun screenTo(name: String): String {
         updateActiveConfig()
-        val cfg = activeConfig ?: return noConfigMessage()
-        if (cfg.screens.isEmpty()) return "${cfg.appKey} no tiene pantallas definidas"
-        val sc = cfg.findScreen(name)
-            ?: return "no conozco la pantalla $name. Las pantallas son: " + cfg.screens.joinToString(", ") { it.displayName }
+        val cfg = anyConfig() ?: return noConfigMessage()
+        val all = (webConfig?.screens.orEmpty() + activeConfig?.screens.orEmpty())
+        if (all.isEmpty()) return "Esta aplicación no tiene pantallas definidas"
+        val sc = webConfig?.findScreen(name) ?: activeConfig?.findScreen(name)
+            ?: return "No conozco la pantalla $name. Las pantallas son: " + all.joinToString(", ") { it.displayName }
         forcedScreenKey = sc.key
         virtualElement = null
         updateActiveConfig()
-        return "pantalla ${sc.displayName}, ${cfg.elementsFor(sc).size} cursores"
+        return "Pantalla ${sc.displayName}, ${cursorsHere().size} cursores. Di: lee cursores."
     }
 
     /** "pantalla automática": vuelve a detectar la pantalla sola. */
@@ -992,21 +1263,21 @@ class VocaliaAccessibilityService : AccessibilityService() {
         forcedScreenKey = null
         virtualElement = null
         updateActiveConfig()
-        return "detección automática de pantalla, " + (currentScreen?.let { "ahora: ${it.displayName}" } ?: "no reconozco la pantalla")
+        return "Detección automática de pantalla. " +
+            ((webScreen ?: currentScreen)?.let { "Ahora: ${it.displayName}" } ?: "No reconozco la pantalla")
     }
 
     /** "qué pantalla es": pantalla actual y cómo se decidió. */
     fun screenInfo(): String {
         updateActiveConfig()
-        val cfg = activeConfig ?: return noConfigMessage()
-        val cur = currentScreen
+        val cfg = anyConfig() ?: return noConfigMessage()
+        val cur = if (cfg === webConfig) webScreen else currentScreen
         val how = if (forcedScreenKey != null) "forzada" else "detectada"
         val sb = StringBuilder()
-        if (cur == null) sb.append("No reconozco la pantalla de ${cfg.appKey}.")
+        if (cur == null) sb.append("No reconozco la pantalla de ${cfg.spokenName}.")
         else sb.append("Pantalla $how: ${cur.displayName}. ${cur.description}.")
-        if (cfg.screens.isNotEmpty()) {
-            sb.append(" Pantallas disponibles: ").append(cfg.screens.joinToString(", ") { it.displayName }).append(".")
-        }
+        val all = cfg.screens
+        if (all.isNotEmpty()) sb.append(" Pantallas disponibles: ").append(all.joinToString(", ") { it.displayName }).append(".")
         return sb.toString()
     }
 
@@ -1014,15 +1285,122 @@ class VocaliaAccessibilityService : AccessibilityService() {
     fun reloadConfig(): String {
         val msg = AppConfigManager.reload()
         updateActiveConfig()
-        return msg + ". " + (activeConfig?.let {
-            "${it.appKey}, pantalla ${screenLabel()}: ${it.elementsFor(currentScreen).size} cursores"
-        } ?: "esta aplicación no tiene configuración")
+        return msg + ". " + (if (anyConfig() != null) "Esta pantalla tiene ${cursorsHere().size} cursores."
+                             else "Esta pantalla no tiene configuración.")
     }
 
     /** "estado de la configuración": diagnóstico hablado. */
     fun configStatus(): String {
         updateActiveConfig()
+        val cfg = anyConfig()
         return AppConfigManager.statusFor(activeConfig, foregroundPackage) +
-            (if (activeConfig != null) " Pantalla actual: ${screenLabel()}." else "")
+            (if (webConfig != null) " Web ${webConfig!!.spokenName}, configuración del ${webConfig!!.configVersion ?: "sin fecha"}." else "") +
+            (if (cfg != null) " Pantalla actual: ${(if (cfg === webConfig) webScreen else currentScreen)?.displayName ?: "ninguna"}." else "")
     }
+
+    // ----------------------------------------------------------------
+    // "¿Dónde estoy?": preguntas sobre la pantalla actual
+    // ----------------------------------------------------------------
+
+    /** Frase corta: app, web, pantalla y sesión. Se dice al entrar en el modo pantalla. */
+    fun whereBrief(): String {
+        updateActiveConfig()
+        val pkg = foregroundPackage ?: return "No sé qué aplicación hay delante."
+        val sb = StringBuilder("Estás en ${appLabel(pkg)}")
+        if (BROWSER_URL_IDS.containsKey(pkg)) {
+            if (webHost != null) sb.append(", en la web $webHost")
+            else sb.append(", sin ninguna página abierta o escribiendo una dirección")
+        }
+        sb.append(". ")
+        val cfg = anyConfig()
+        val sc = if (cfg != null && cfg === webConfig) webScreen else currentScreen
+        sc?.let { sb.append("Pantalla: ${it.displayName}. ") }
+        loginSentence(cfg)?.let { sb.append(it).append(' ') }
+        return sb.toString().trim()
+    }
+
+    /** "¿dónde estoy?" / "¿qué hay en pantalla?": resumen completo y qué hacer a continuación. */
+    fun whereAmI(): String {
+        val sb = StringBuilder(whereBrief()).append(' ')
+        anyConfig()?.description?.takeIf { it.isNotBlank() }?.let { sb.append(it).append(". ") }
+        if (webHost != null && webConfig == null) {
+            sb.append("No tengo información preparada de esta web, así que solo puedo leer lo que se ve. ")
+        }
+        refreshNodeList(preserveIndex = true)
+        val fields = interactiveNodes.count { it.isEditable }
+        val buttons = interactiveNodes.count { !it.isEditable && (it.isClickable || it.isCheckable) }
+        val texts = interactiveNodes.count { !it.isEditable && !it.isClickable && it.text.clean() != null }
+        sb.append("Veo $buttons botones, $fields campos de texto y $texts textos. ")
+        val samples = interactiveNodes.filter { !it.isEditable && !it.isClickable }
+            .mapNotNull { it.text.clean() }.take(3)
+        if (samples.isNotEmpty()) {
+            sb.append("Algunos textos: ").append(samples.joinToString(". ") { SpeechText.speakable(it, 150) }).append(". ")
+        }
+        val c = cursorsHere().size
+        if (c > 0) sb.append("Hay $c cursores preparados: di lee cursores. ")
+        sb.append("Para oír toda la pantalla di: lee todo. Para más ayuda di: ayuda.")
+        return sb.toString()
+    }
+
+    /** "¿he iniciado sesión?" */
+    fun loginInfo(): String {
+        updateActiveConfig()
+        val cfg = anyConfig()
+        return loginSentence(cfg)
+            ?: if (cfg?.login != null) "No hace falta iniciar sesión aquí."
+               else "No tengo información sobre la sesión en esta pantalla."
+    }
+
+    // ----------------------------------------------------------------
+    // Abrir webs
+    // ----------------------------------------------------------------
+
+    /** "abre la web de wikipedia": abre la web conocida en el navegador. */
+    fun openWeb(query: String): String {
+        AppConfigManager.reloadIfChanged()
+        val q = SpeechText.normalize(query)
+        val webs = AppConfigManager.allWebs()
+        val web = webs.firstOrNull { w -> w.phrases.any { SpeechText.normalize(it) == q } }
+            ?: webs.firstOrNull { w ->
+                w.phrases.any { p -> val n = SpeechText.normalize(p); n.isNotEmpty() && (n.contains(q) || q.contains(n)) }
+            }
+            ?: return "No conozco la web $query. Di: qué webs conoces, para oír las que sé abrir."
+        val url = web.url ?: "https://${web.key}"
+        val base = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val browser = foregroundPackage?.takeIf { BROWSER_URL_IDS.containsKey(it) }
+        return try {
+            if (browser != null) base.setPackage(browser)
+            startActivity(base)
+            "Abriendo ${web.key}"
+        } catch (t: Throwable) {
+            try {
+                base.setPackage(null)
+                startActivity(base)
+                "Abriendo ${web.key}"
+            } catch (t2: Throwable) {
+                dbg("openWeb THREW ${t2.javaClass.simpleName}: ${t2.message}")
+                "No he podido abrir ${web.key}"
+            }
+        }
+    }
+
+    /** "qué webs conoces". */
+    fun listWebs(): String {
+        AppConfigManager.reloadIfChanged()
+        val webs = AppConfigManager.allWebs()
+        if (webs.isEmpty()) return "No tengo webs preparadas."
+        val lines = webs.map { w ->
+            val d = if (w.description.isNotBlank()) ", ${w.description}" else ""
+            "${w.key}$d"
+        }
+        return startReading("Conozco ${webs.size} webs. Para abrir una di: abre la web de, y su nombre.", lines)
+    }
+
+    // ----------------------------------------------------------------
+    // Para el modo dictado (siguiente fase)
+    // ----------------------------------------------------------------
+
+    /** Campo de texto con el foco de entrada, o null. */
+    fun focusedInput(): AccessibilityNodeInfo? =
+        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
 }

@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "_nota": "Perfiles de gramática para el futuro modo dictado (aún NO se usan). Cada perfil dice qué palabras y símbolos debe esperar el reconocimiento de voz según lo que se vaya a escribir. 'kind' = FREE_TEXT, CONVERSATION, CODE, USERNAME, PERSON_NAME, DATE, AGE, NUMBER, EMAIL, PASSWORD, CAPTCHA, URL, SEARCH_QUERY. Puedes añadir palabras o perfiles propios.",
+  "profiles": {
+    "deletreo-es": {
+      "kind": "PASSWORD",
+      "description": "Dictado letra a letra: contraseñas, usuarios, códigos y captchas",
+      "spelled": true,
+      "modifiers": ["mayúscula", "minúscula"],
+      "words": ["a","be","ce","de","e","efe","ge","hache","i","jota","ka","ele","eme","ene","eñe","o","pe","cu","erre","ese","te","u","uve","uve doble","equis","i griega","zeta",
+                "cero","uno","dos","tres","cuatro","cinco","seis","siete","ocho","nueve"],
+      "symbols": {
+        "arroba": "@", "punto": ".", "coma": ",", "guion": "-", "guion bajo": "_", "barra": "/",
+        "dos puntos": ":", "punto y coma": ";", "almohadilla": "#", "dólar": "$", "por ciento": "%",
+        "ampersand": "&", "asterisco": "*", "más": "+", "igual": "=", "interrogación": "?", "exclamación": "!",
+        "paréntesis abierto": "(", "paréntesis cerrado": ")", "corchete abierto": "[", "corchete cerrado": "]",
+        "llave abierta": "{", "llave cerrada": "}", "comillas": "\"", "comilla simple": "'", "espacio": " "
+      }
+    },
+    "correo-es": {
+      "kind": "EMAIL",
+      "description": "Direcciones de correo: letras sueltas más arroba, punto y dominios habituales",
+      "spelled": true,
+      "words": ["gmail","hotmail","outlook","yahoo","icloud","proton","com","es","net","org"],
+      "symbols": { "arroba": "@", "punto": ".", "guion": "-", "guion bajo": "_" }
+    },
+    "numeros-es": {
+      "kind": "NUMBER",
+      "description": "Números, edades y fechas",
+      "words": ["cero","uno","dos","tres","cuatro","cinco","seis","siete","ocho","nueve","diez","once","doce","trece","catorce","quince",
+                "veinte","treinta","cuarenta","cincuenta","sesenta","setenta","ochenta","noventa","cien","mil","millón",
+                "enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre","de","del"]
+    },
+    "conversacion-es": {
+      "kind": "CONVERSATION",
+      "language": "es",
+      "description": "Conversación cotidiana",
+      "words": ["hola","gracias","por favor","buenos días","buenas tardes","buenas noches","adiós","vale","sí","no","quizás","luego","mañana","hoy","ahora"],
+      "symbols": { "punto": ".", "coma": ",", "interrogación": "?", "exclamación": "!", "nueva línea": "\n" }
+    },
+    "jerga-it": {
+      "kind": "FREE_TEXT",
+      "topic": "it",
+      "description": "Informática y redes",
+      "words": ["router","PC","software","hardware","open source","servidor","cliente","red","wifi","contraseña","firewall","VPN","DNS","IP","navegador","actualización","backup","nube"]
+    },
+    "jerga-ciberseguridad": {
+      "kind": "FREE_TEXT",
+      "topic": "ciberseguridad",
+      "description": "Ciberseguridad",
+      "words": ["MITM","phishing","malware","ransomware","exploit","vulnerabilidad","pentesting","hash","cifrado","payload","backdoor","XSS","SQL injection","CVE","rootkit","botnet"]
+    },
+    "codigo-javascript": {
+      "kind": "CODE",
+      "language": "javascript",
+      "description": "JavaScript",
+      "words": ["var","let","const","function","return","if","else","for","while","switch","case","break","continue","class","new","this","import","export","async","await","try","catch","throw","null","undefined","true","false","console"],
+      "symbols": { "abre paréntesis": "(", "cierra paréntesis": ")", "abre llave": "{", "cierra llave": "}", "abre corchete": "[", "cierra corchete": "]",
+                   "punto y coma": ";", "flecha": "=>", "igual igual igual": "===", "distinto": "!==", "y lógico": "&&", "o lógico": "||" }
+    },
+    "codigo-python": {
+      "kind": "CODE",
+      "language": "python",
+      "description": "Python",
+      "words": ["print","def","return","if","elif","else","for","while","in","import","from","as","class","self","try","except","finally","with","lambda","None","True","False","len","range"],
+      "symbols": { "dos puntos": ":", "abre paréntesis": "(", "cierra paréntesis": ")", "sangría": "    ", "guion bajo": "_" }
+    },
+    "codigo-c": {
+      "kind": "CODE",
+      "language": "c",
+      "description": "C",
+      "words": ["printf","scanf","int","char","float","double","void","struct","typedef","include","define","return","if","else","for","while","switch","case","break","sizeof","malloc","free","NULL"],
+      "symbols": { "punto y coma": ";", "almohadilla": "#", "flecha": "->", "abre llave": "{", "cierra llave": "}", "ampersand": "&", "asterisco": "*" }
+    },
+    "codigo-cpp": {
+      "kind": "CODE",
+      "language": "cpp",
+      "description": "C++",
+      "words": ["cout","cin","endl","std","namespace","using","class","template","vector","string","new","delete","include","iostream","int","char","float","double","void","return","if","else","for","while","auto","nullptr"],
+      "symbols": { "dos dos puntos": "::", "punto y coma": ";", "doble menor": "<<", "doble mayor": ">>", "almohadilla": "#" }
+    }
+  }
+}
